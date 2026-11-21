@@ -1,0 +1,48 @@
+[package]
+name = "tagcast-player"
+version = "0.3.5"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+license = "MIT"
+description = "Lightweight read-only iBroadcast desktop player"
+
+[dependencies]
+cpal = "0.16"
+eframe = { version = "0.37", default-features = false, features = [
+    "accesskit",
+    "clipboard",
+    "default_fonts",
+    "glow",
+    "links",
+    "persistence",
+    "system_fonts",
+    "wayland",
+    "x11",
+] }
+fastrand = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+m3u8-rs = { version = "6", default-features = false, features = ["parser"] }
+mpeg2ts-reader = "0.18"
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json", "gzip"] }
+rubato = { version = "0.16", default-features = false }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+souvlaki = "0.8.3"
+symphonia = { version = "0.5.5", default-features = false, features = ["all"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "sync"] }
+tokio-util = "0.7"
+unicode-normalization = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle = "0.6"
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = true
