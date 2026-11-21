@@ -177,7 +177,8 @@ def main():
                 command = [str(args.example.resolve()), base, str(args.soak), str(args.synthetic_hours)]
                 if args.skip_device:
                     command.append("--skip-device")
-                proc = subprocess.run(command, capture_output=True, text=True)
+                proc = subprocess.run(command, capture_output=True, text=True,
+                                      timeout=max(300, args.soak + 180, args.synthetic_hours * 480))
                 if proc.stderr:
                     print(proc.stderr, end="")
                 if proc.returncode:

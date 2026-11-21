@@ -1,9 +1,57 @@
 # Tagcast Lite
 
-A lightweight, read-only iBroadcast desktop player. It's one native window with
-your library, a queue and a now-playing bar. It needs no Python, FFmpeg,
+<p align="center"><b>Lightweight desktop player for iBroadcast.</b></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/ibroadcast-dark-compact-powered.svg">
+    <img src="assets/ibroadcast-light-compact-powered.svg" width="220" alt="Powered by iBroadcast">
+  </picture><br>
+  <small>Independent app by Cyberdelia</small>
+</p>
+<p align="center">
+  <a href="https://github.com/cyberdeliaAI/tagcast-lite/actions/workflows/build.yml"><img src="https://github.com/cyberdeliaAI/tagcast-lite/actions/workflows/build.yml/badge.svg" alt="Native builds"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2e7d4f" alt="MIT license"></a>
+</p>
+
+Tagcast Lite brings your [iBroadcast](https://www.ibroadcast.com/) music library,
+queue and playback controls together in one native, read-only player. It needs no Python, FFmpeg,
 Electron, browser or installed media player. On macOS it uses the system audio
 output and the Keychain.
+
+[Download the latest release](https://github.com/cyberdeliaAI/tagcast-lite/releases/latest)
+
+## Screenshots
+
+![Albums with cover art, the compact sidebar and playback controls](docs/screenshots/albums.jpg)
+
+<details>
+<summary>More screenshots</summary>
+
+### Songs
+
+![The sortable Songs view](docs/screenshots/songs.jpg)
+
+### Album
+
+![Album details, cover art and track list](docs/screenshots/album.jpg)
+
+### Album artist
+
+![An album artist's catalogue](docs/screenshots/album-artist.jpg)
+
+### Years
+
+![Browse years with album and track counts](docs/screenshots/years.jpg)
+
+### Genre
+
+![Albums from a genre in random order](docs/screenshots/genre.jpg)
+
+### Playlist
+
+![A playlist with the current track highlighted](docs/screenshots/playlist.jpg)
+
+</details>
 
 ## Using it
 
@@ -113,10 +161,19 @@ The script signs the app ad hoc. Set `CODESIGN_IDENTITY` to your Developer ID
 Application identity to sign it with that instead.
 
 The Native builds workflow builds and packages Apple Silicon, Intel macOS, Windows
-x64 and Linux x64. On Linux install the ALSA, D-Bus, OpenSSL, XKB and OpenGL
-development libraries. Linux stores credentials in a private file under
+x64 and Linux x64. Pull requests and manual runs validate the packages. Pushing a
+version tag matching `Cargo.toml` signs and notarizes the macOS apps and publishes
+all four archives and their checksums as a GitHub Release. The macOS release
+job uses the repository's `CSC_LINK` (a base64-encoded Developer ID Application
+PKCS#12), `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+`APPLE_TEAM_ID` secrets.
+
+On Linux install the ALSA, D-Bus, OpenSSL, XKB and OpenGL development libraries.
+Linux stores credentials in a private file under
 `$XDG_DATA_HOME/tagcast-player` and uses MPRIS for desktop controls. Windows
-stores credentials in Windows Credential Manager.
+stores credentials in Windows Credential Manager. The player keeps its preferences
+with its local library data and imports preferences from earlier installations on
+first use.
 
 ### Playback checks
 
@@ -126,7 +183,8 @@ python3 -B tests/playback_fixture.py target/release/examples/playback_checks
 ```
 
 These need FFmpeg and Python. They use temporary synthetic audio and a loopback
-HTTP server. The report measures Play to the first decoded frames scheduled by
+HTTP server. CI runs the Linux checks with `--skip-device --soak 5 --synthetic-hours 0.02`.
+The report measures Play to the first decoded frames scheduled by
 CoreAudio with the output muted and a fixed 40 ms fixture delay on the initial
 HTTP response. RSS samples cover the playback process and its frameworks, with
 no live library loaded. The accelerated run drains the same PCM queue into a test
@@ -148,6 +206,9 @@ Every track then plays the given loopback file and covers load from
 sign-in screen with a sample code. Release builds leave all of this out.
 
 ## Credits
+
+Tagcast Lite is an independent player for iBroadcast. The Powered by iBroadcast
+badge is provided under the [iBroadcast branding guidelines](https://help.ibroadcast.com/en/developer/branding).
 
 The interface uses [egui](https://github.com/emilk/egui) and the
 [Inter](https://rsms.me/inter/) typeface (SIL Open Font License, see

@@ -456,17 +456,19 @@ impl Read for RangeReader {
             return Ok(0);
         }
         while state.consumed == state.bytes.len() {
-            state.consumed = 0;
-            state.bytes = match self.request.http.run(&self.stop, async {
+            // A failed read must not make the previous chunk available again.
+            let bytes: Box<[u8]> = match self.request.http.run(&self.stop, async {
                 state.response.chunk().await.map_err(http_error)
             }) {
                 Ok(Some(bytes)) => bytes.to_vec().into(),
                 Ok(None) => return Err(fault(Failure::Network, &self.fault)),
                 Err(error) => return Err(fault(error, &self.fault)),
             };
-            if state.bytes.len() as u64 > self.length - state.position {
+            if bytes.len() as u64 > self.length - state.position {
                 return Err(fault(Failure::Unsupported, &self.fault));
             }
+            state.bytes = bytes;
+            state.consumed = 0;
         }
         let bytes = &state.bytes[state.consumed..];
         let n = out.len().min(bytes.len());
@@ -697,6 +699,58 @@ impl MediaSource for BufferReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+    };
+
+    #[test]
+    fn a_truncated_range_never_replays_the_last_chunk() {
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = Url::parse(&format!(
+            "http://{}/test.flac",
+            server.local_addr().unwrap()
+        ))
+        .unwrap();
+        let sender = thread::spawn(move || {
+            let (mut socket, _) = server.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = String::new();
+            let mut reader = BufReader::new(&mut socket);
+            loop {
+                assert_ne!(reader.read_line(&mut request).unwrap(), 0);
+                if request.ends_with("\r\n\r\n") {
+                    break;
+                }
+            }
+            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-15/16\r\nContent-Length: 16\r\nConnection: close\r\n\r\nFLAC").unwrap();
+        });
+        let request = MediaRequest::fixture(
+            Http::new().unwrap(),
+            url,
+            None,
+            None,
+            "flac",
+            Quality::Original,
+        )
+        .unwrap();
+        let mut input = open(
+            &request,
+            Route::Direct(Quality::Original),
+            0.0,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        let mut chunk = [0; 4];
+        input.source.read_exact(&mut chunk).unwrap();
+        assert_eq!(&chunk, b"FLAC");
+        for _ in 0..2 {
+            assert!(input.source.read(&mut chunk).is_err());
+        }
+        sender.join().unwrap();
+    }
 
     #[test]
     fn oversized_non_range_buffer_slides_without_exceeding_its_budget() {

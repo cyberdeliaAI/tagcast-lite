@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "tagcast-player"
-version = "0.3.5"
+version = "0.3.6"
 dependencies = [
  "cpal",
  "eframe",

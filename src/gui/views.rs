@@ -1027,9 +1027,9 @@ impl App {
             ),
         ];
 
-        let footer_height = 66.0
+        let footer_height = 73.0
             + if self.audio_error.is_some() {
-                44.0
+                20.0
             } else {
                 0.0
             };
@@ -1118,10 +1118,18 @@ impl App {
                     ui.separator();
                     let mut gapless = self.settings.gapless;
                     let status = if gapless { "On" } else { "Off" };
-                    if ui.checkbox(&mut gapless, format!("Gapless · Original FLAC · {status}"))
-                        .on_hover_text("Play compatible Original FLAC albums without gaps in album order.")
-                        .changed()
-                    {
+                    let changed = ui.scope(|ui| {
+                        let widgets = &mut ui.visuals_mut().widgets;
+                        let border = Stroke::new(1.0, theme::MUTED);
+                        widgets.inactive.bg_stroke = border;
+                        widgets.hovered.bg_stroke = border;
+                        widgets.active.bg_stroke = border;
+                        widgets.open.bg_stroke = border;
+                        ui.checkbox(&mut gapless, format!("Gapless · Original FLAC · {status}"))
+                            .on_hover_text("Play compatible Original FLAC albums without gaps in album order.")
+                            .changed()
+                    }).inner;
+                    if changed {
                         actions.push(Action::ToggleGapless);
                     }
                     if ui.button("Reconnect audio output")
@@ -1159,29 +1167,50 @@ impl App {
                 });
             });
         });
-        if let Some(catalog) = &self.catalog {
-            let plan = if premium { "Premium" } else { "Free" };
-            let status = if self.loading.is_some() {
-                "Updating library…".to_owned()
-            } else {
-                format!(
-                    "{} · {plan}",
-                    count(catalog.library.tracks.len(), "song", "songs")
-                )
-            };
-            ui.label(
-                RichText::new(status)
-                    .font(regular(11.5))
-                    .color(theme::FAINT),
-            );
+        if let Some(error) = &self.audio_error {
+            ui.scope(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                ui.visuals_mut().hyperlink_color = theme::WARN;
+                let reconnect =
+                    RichText::new("No audio output. Click to reconnect").font(regular(11.5));
+                if ui.link(reconnect).on_hover_text(error.as_str()).clicked() {
+                    actions.push(Action::RecoverOutput);
+                }
+            });
         }
-        if let Some(error) = &self.audio_error
-            && ui
-                .link(RichText::new(error).font(regular(11.5)).color(theme::WARN))
-                .clicked()
-        {
-            actions.push(Action::RecoverOutput);
-        }
+        ui.horizontal(|ui| {
+            ui.set_min_height(24.0);
+            self.show_ibroadcast_badge(ui, 92.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if self.loading.is_some() {
+                    ui.label(
+                        RichText::new("Updating")
+                            .font(regular(11.5))
+                            .color(theme::MUTED),
+                    );
+                    ui.add(egui::Spinner::new().size(12.0).color(theme::ACCENT_TEXT));
+                } else if self.catalog.is_some() {
+                    let (plan, text, fill, border) = if premium {
+                        (
+                            "Premium",
+                            theme::ACCENT_TEXT,
+                            theme::ACCENT.gamma_multiply(0.18),
+                            theme::ACCENT_TEXT.gamma_multiply(0.45),
+                        )
+                    } else {
+                        ("Free", theme::MUTED, theme::SURFACE, theme::LINE)
+                    };
+                    egui::Frame::new()
+                        .fill(fill)
+                        .stroke(Stroke::new(1.0, border))
+                        .corner_radius(10)
+                        .inner_margin(egui::Margin::symmetric(8, 2))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(plan).font(strong(11.5)).color(text));
+                        });
+                }
+            });
+        });
     }
 
     // ---- pages ------------------------------------------------------------

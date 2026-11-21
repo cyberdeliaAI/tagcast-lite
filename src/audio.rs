@@ -34,6 +34,11 @@ use crate::{
 type Frame = [f32; 2];
 const TICK: Duration = Duration::from_millis(5);
 const CONVERT_BLOCK: usize = 512;
+const GAPLESS_LOOKAHEAD_SECONDS: f64 = 25.0;
+
+fn in_gapless_window(duration: Option<f64>, position: f64) -> bool {
+    duration.is_some_and(|end| (0.0..=GAPLESS_LOOKAHEAD_SECONDS).contains(&(end - position)))
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Phase {
@@ -559,7 +564,9 @@ impl Player {
         };
         if snapshot.track_key != next.from
             || snapshot.first_audio.is_none()
+            || snapshot.paused
             || snapshot.phase != Phase::Playing
+            || !in_gapless_window(snapshot.duration, snapshot.position)
             || snapshot.route != Some(Route::Direct(Quality::Original))
             || next.request.quality != Quality::Original
         {
@@ -1166,6 +1173,16 @@ impl Converter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gapless_preloads_in_the_last_25_seconds_of_a_known_duration() {
+        assert!(!in_gapless_window(Some(180.0), 154.99));
+        assert!(in_gapless_window(Some(180.0), 155.0));
+        assert!(in_gapless_window(Some(180.0), 179.9));
+        assert!(!in_gapless_window(Some(180.0), 181.0));
+        assert!(!in_gapless_window(None, 170.0));
+        assert!(!in_gapless_window(Some(f64::INFINITY), 170.0));
+    }
     use crate::{Url, account::Http};
 
     fn successor() -> Successor {

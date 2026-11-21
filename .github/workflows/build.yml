@@ -2,6 +2,8 @@ name: Native builds
 
 on:
   push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
 
@@ -23,28 +25,66 @@ jobs:
           - runner: ubuntu-24.04
             platform: linux-x64
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify release version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::The release tag must match version $version in Cargo.toml."
+            exit 1
+          fi
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libdbus-1-dev libssl-dev libxkbcommon-dev libgl1-mesa-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+          sudo apt-get install -y ffmpeg libasound2-dev libdbus-1-dev libssl-dev libxkbcommon-dev libgl1-mesa-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Select Rust
         run: rustup update stable
       - name: Test
         run: cargo +stable test --locked --all-targets
+      - name: Build playback fixture executable
+        if: runner.os == 'Linux'
+        run: cargo +stable build --locked --release --example playback_checks
+      - name: Check playback, seeking, network recovery and gapless
+        if: runner.os == 'Linux'
+        timeout-minutes: 7
+        run: python3 -B tests/playback_fixture.py target/release/examples/playback_checks --skip-device --soak 5 --synthetic-hours 0.02
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: scripts/make-macos-app.sh
+      - name: Sign and notarize macOS release
+        if: runner.os == 'macOS' && github.ref_type == 'tag'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/sign-macos-app.sh "target/release/Tagcast Lite.app"
       - name: Package macOS app
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          scripts/make-macos-app.sh
           app="target/release/Tagcast Lite.app"
           codesign --verify --strict "$app"
           "$app/Contents/MacOS/tagcast-player" --version
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" "dist/tagcast-lite-${{ matrix.platform }}.zip"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            check=$(mktemp -d)
+            trap 'rm -rf "$check"' EXIT
+            ditto -x -k "dist/tagcast-lite-${{ matrix.platform }}.zip" "$check"
+            xcrun stapler validate "$check/Tagcast Lite.app"
+            codesign --verify --strict "$check/Tagcast Lite.app"
+          fi
       - name: Package Windows build
         if: runner.os == 'Windows'
         shell: pwsh
@@ -72,3 +112,43 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: tagcast-lite-*
+          merge-multiple: true
+      - name: Publish release archives
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          status=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft) || status=missing
+          if [[ "$status" == false ]]; then
+            echo "Release $tag has already been published."
+            exit 0
+          fi
+          mkdir release
+          for platform in macos-arm64 macos-x64 windows-x64 linux-x64; do
+            extension=zip
+            if [[ "$platform" == linux-x64 ]]; then extension=tar.gz; fi
+            mv "dist/tagcast-lite-$platform.$extension" "release/tagcast-lite-$version-$platform.$extension"
+          done
+          cd release
+          sha256sum tagcast-lite-* > SHA256SUMS.txt
+          if [[ "$status" == missing ]]; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Tagcast Lite $tag" --generate-notes
+          fi
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber tagcast-lite-* SHA256SUMS.txt
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false

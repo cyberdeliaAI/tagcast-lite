@@ -11,6 +11,9 @@ mod views;
 use std::{
     collections::HashSet,
     error::Error,
+    fs::File,
+    io::{Read, Write},
+    path::{Path, PathBuf},
     sync::{
         Arc,
         mpsc::{Receiver, Sender, channel},
@@ -23,7 +26,7 @@ use eframe::egui::{self, Key, Margin, RichText};
 use serde::{Deserialize, Serialize};
 use tagcast_player::{
     APP_NAME, CancellationToken, Failure, Result,
-    account::{Account, Http, LibraryUpdate, Session, Track, logout},
+    account::{Account, Http, LibraryUpdate, Session, Track, data_dir, logout, write_private_once},
     audio::{NextTrack, Output, Phase, Player},
     transport::{MediaRequest, Quality},
 };
@@ -41,10 +44,68 @@ pub struct Options {
     pub client_id: Option<String>,
 }
 
+const APP_ID: &str = "tagcast-player";
+
+fn preferences() -> Option<PathBuf> {
+    let target = data_dir()?.join("app.ron");
+    let previous = [APP_ID, APP_NAME, "Tagcast Player"]
+        .into_iter()
+        .filter_map(eframe::storage_dir)
+        .map(|dir| dir.join("app.ron"));
+    Some(migrate_preferences(target, previous))
+}
+
+fn migrate_preferences(target: PathBuf, previous: impl IntoIterator<Item = PathBuf>) -> PathBuf {
+    if target.exists() {
+        return target;
+    }
+    for old in previous {
+        if old != target && old.is_file() {
+            return if copy_preferences(&old, &target).is_ok() {
+                target
+            } else {
+                old
+            };
+        }
+    }
+    target
+}
+
+fn copy_preferences(from: &Path, to: &Path) -> std::io::Result<()> {
+    const MAX_BYTES: u64 = 2 * 1024 * 1024;
+    let mut data = Vec::new();
+    File::open(from)?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut data)?;
+    if data.len() as u64 > MAX_BYTES {
+        return Err(std::io::Error::other("Preferences file is too large"));
+    }
+    write_private_once(to, |file| file.write_all(&data))
+}
+
+#[cfg(test)]
+mod preferences_tests {
+    use super::*;
+
+    #[test]
+    fn migrates_preferences_without_replacing_existing_settings() {
+        let folder = tempfile::tempdir().unwrap();
+        let old = folder.path().join("old.ron");
+        let target = folder.path().join("player/app.ron");
+        std::fs::write(&old, b"original settings").unwrap();
+        assert_eq!(migrate_preferences(target.clone(), [old.clone()]), target);
+        assert_eq!(std::fs::read(&target).unwrap(), b"original settings");
+        std::fs::write(&target, b"updated settings").unwrap();
+        assert_eq!(migrate_preferences(target.clone(), [old.clone()]), target);
+        assert_eq!(std::fs::read(&target).unwrap(), b"updated settings");
+        assert_eq!(std::fs::read(&old).unwrap(), b"original settings");
+    }
+}
+
 pub fn run(options: Options) -> std::result::Result<(), Box<dyn Error>> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_NAME)
-        .with_app_id("tagcast-player")
+        .with_app_id(APP_ID)
         .with_inner_size([1200.0, 780.0])
         .with_min_inner_size([820.0, 540.0]);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png"))
@@ -55,12 +116,16 @@ pub fn run(options: Options) -> std::result::Result<(), Box<dyn Error>> {
     let fixture_preferences = std::env::var_os("TAGCAST_PLAYER_FIXTURE")
         .map(|_| tempfile::NamedTempFile::new())
         .transpose()?;
+    #[cfg(debug_assertions)]
+    let persistence_path = match &fixture_preferences {
+        Some(file) => Some(file.path().to_owned()),
+        None => preferences(),
+    };
+    #[cfg(not(debug_assertions))]
+    let persistence_path = preferences();
     let native = eframe::NativeOptions {
         viewport,
-        #[cfg(debug_assertions)]
-        persistence_path: fixture_preferences
-            .as_ref()
-            .map(|file| file.path().to_owned()),
+        persistence_path,
         ..Default::default()
     };
     eframe::run_native(
@@ -294,6 +359,7 @@ pub struct App {
     selected: Option<u64>,
     art: Artwork,
     logo: Option<egui::TextureHandle>,
+    ibroadcast_badge: Option<egui::TextureHandle>,
     /// A requested position, shown until playback reaches it.
     seeking: Option<(f64, Instant)>,
     title: String,
@@ -320,6 +386,14 @@ impl App {
         let logo = artwork::decode(include_bytes!("../../assets/icon-256.png"), 96).map(|image| {
             cc.egui_ctx
                 .load_texture("logo", image, egui::TextureOptions::LINEAR)
+        });
+        let ibroadcast_badge = artwork::decode(
+            include_bytes!("../../assets/ibroadcast-dark-compact-powered.png"),
+            339,
+        )
+        .map(|image| {
+            cc.egui_ctx
+                .load_texture("ibroadcast-badge", image, egui::TextureOptions::LINEAR)
         });
         let (send, receive) = channel();
         let mut app = Self {
@@ -360,6 +434,7 @@ impl App {
             selected: None,
             art: Artwork::new(cc.egui_ctx.clone()),
             logo,
+            ibroadcast_badge,
             seeking: None,
             title: String::new(),
             toast: None,
@@ -681,6 +756,7 @@ impl App {
         let next = (|| {
             if !self.settings.gapless
                 || !self.ordered_album
+                || self.seeking.is_some()
                 || self.settings.shuffle
                 || self.settings.repeat == Repeat::One
                 || self.settings.quality() != Quality::Original
@@ -1263,6 +1339,17 @@ enum SignInAction {
 }
 
 impl App {
+    fn show_ibroadcast_badge(&self, ui: &mut egui::Ui, width: f32) {
+        if let Some(badge) = &self.ibroadcast_badge {
+            let size = badge.size_vec2();
+            ui.add(
+                egui::Image::new(badge)
+                    .fit_to_exact_size(egui::vec2(width, width * size.y / size.x))
+                    .alt_text("Powered by iBroadcast"),
+            );
+        }
+    }
+
     fn sign_in(&mut self, ui: &mut egui::Ui) -> Option<SignInAction> {
         let Stage::SignIn {
             code, error, busy, ..
@@ -1274,7 +1361,7 @@ impl App {
         egui::CentralPanel::default()
             .frame(theme::panel(theme::BG, 0))
             .show(ui, |ui| {
-                let card = egui::vec2(420.0, 380.0);
+                let card = egui::vec2(420.0, 420.0);
                 let rect = egui::Rect::from_center_size(ui.max_rect().center(), card);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     egui::Frame::new()
@@ -1290,7 +1377,9 @@ impl App {
                                 }
                                 ui.add_space(6.0);
                                 ui.label(RichText::new(APP_NAME).font(theme::strong(22.0)).color(theme::TEXT));
-                                ui.label(RichText::new("Your iBroadcast library, in a light desktop player").color(theme::MUTED));
+                                ui.label(RichText::new("An independent player for your iBroadcast library").color(theme::MUTED));
+                                ui.add_space(4.0);
+                                self.show_ibroadcast_badge(ui, 128.0);
                                 ui.add_space(18.0);
                                 match (code, busy) {
                                     (Some((uri, user_code)), true) => {

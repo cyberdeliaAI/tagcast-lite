@@ -724,6 +724,18 @@ pub fn write_private(
     Ok(())
 }
 
+/// Publishes a private file atomically if another process has not created it.
+pub fn write_private_once(
+    path: &std::path::Path,
+    write: impl FnOnce(&mut File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    match stage_private(path, write)?.persist_noclobber(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.error),
+    }
+}
+
 fn read_cache(client: &str) -> Option<Library> {
     let file = File::open(cache_path(client)?).ok()?;
     if file.metadata().ok()?.len() > LIBRARY_LIMIT as u64 {
@@ -1394,57 +1406,58 @@ mod tests {
             assert_eq!(artwork_server(Some(bad)), ARTWORK_SERVER, "{bad}");
         }
     }
-}
-#[test]
-fn upload_order_accepts_real_dates_and_retains_available_precision() {
-    let day = upload_order("2024-02-29", "").unwrap();
-    let midnight = upload_order("2024-02-29T00:00:00", "").unwrap();
-    let evening = upload_order("2024-02-29", "21:42:09").unwrap();
-    assert!(day < midnight && midnight < evening);
-    assert!(evening < upload_order("2024-03-01", "").unwrap());
-    assert_eq!(upload_order("2024-02-29", "24:00:00"), Some(day));
-    assert_eq!(upload_order("2023-02-29", ""), None);
-    assert_eq!(upload_order("2024-04-31", ""), None);
-    assert_eq!(upload_order("2024-０1-01", ""), None);
-}
 
-#[test]
-fn previous_cache_can_be_displayed_but_forces_metadata_refresh() {
-    let current = Library {
-        format: LIBRARY_FORMAT,
-        owner: "73".into(),
-        revision: "4321".into(),
-        ..Library::default()
-    };
-    let mut previous = serde_json::to_value(&current).unwrap();
-    previous["format"] = json!(OLDEST_LIBRARY_FORMAT);
-    previous.as_object_mut().unwrap().remove("album_metadata");
-    let parsed: Library = serde_json::from_value(previous).unwrap();
-    assert_eq!(current.stamp().revision, "4321");
-    assert_eq!(parsed.stamp().owner, "73");
-    assert!(parsed.stamp().revision.is_empty());
-    assert!(parsed.album_metadata.is_empty());
-    assert!(!parsed.has_album_metadata());
-    let mut v4 = current;
-    v4.format = UPLOAD_METADATA_FORMAT;
-    assert!(v4.has_album_metadata());
-    assert!(v4.stamp().revision.is_empty());
-}
+    #[test]
+    fn upload_order_accepts_real_dates_and_retains_available_precision() {
+        let day = upload_order("2024-02-29", "").unwrap();
+        let midnight = upload_order("2024-02-29T00:00:00", "").unwrap();
+        let evening = upload_order("2024-02-29", "21:42:09").unwrap();
+        assert!(day < midnight && midnight < evening);
+        assert!(evening < upload_order("2024-03-01", "").unwrap());
+        assert_eq!(upload_order("2024-02-29", "24:00:00"), Some(day));
+        assert_eq!(upload_order("2023-02-29", ""), None);
+        assert_eq!(upload_order("2024-04-31", ""), None);
+        assert_eq!(upload_order("2024-０1-01", ""), None);
+    }
 
-#[test]
-fn artist_portraits_read_compact_and_named_rows_and_omit_ambiguous_names() {
-    let artists = json!({
-        "map": {"name":0, "artwork_id":1},
-        "1": ["Björk", 40],
-        "2": {"name":"The Cure", "artwork_id":50},
-        "3": ["Guest", 60],
-        "4": ["Güest", 70],
-        "5": ["  ", 80],
-        "6": ["Album cover only", 0],
-        "0": ["Reserved", 1]
-    });
-    let portraits = artist_portraits(&artists);
-    assert_eq!(portraits.len(), 2);
-    assert_eq!(portraits["bjork"], 40);
-    assert_eq!(portraits["the cure"], 50);
+    #[test]
+    fn previous_cache_can_be_displayed_but_forces_metadata_refresh() {
+        let current = Library {
+            format: LIBRARY_FORMAT,
+            owner: "73".into(),
+            revision: "4321".into(),
+            ..Library::default()
+        };
+        let mut previous = serde_json::to_value(&current).unwrap();
+        previous["format"] = json!(OLDEST_LIBRARY_FORMAT);
+        previous.as_object_mut().unwrap().remove("album_metadata");
+        let parsed: Library = serde_json::from_value(previous).unwrap();
+        assert_eq!(current.stamp().revision, "4321");
+        assert_eq!(parsed.stamp().owner, "73");
+        assert!(parsed.stamp().revision.is_empty());
+        assert!(parsed.album_metadata.is_empty());
+        assert!(!parsed.has_album_metadata());
+        let mut v4 = current;
+        v4.format = UPLOAD_METADATA_FORMAT;
+        assert!(v4.has_album_metadata());
+        assert!(v4.stamp().revision.is_empty());
+    }
+
+    #[test]
+    fn artist_portraits_read_compact_and_named_rows_and_omit_ambiguous_names() {
+        let artists = json!({
+            "map": {"name":0, "artwork_id":1},
+            "1": ["Björk", 40],
+            "2": {"name":"The Cure", "artwork_id":50},
+            "3": ["Guest", 60],
+            "4": ["Güest", 70],
+            "5": ["  ", 80],
+            "6": ["Album cover only", 0],
+            "0": ["Reserved", 1]
+        });
+        let portraits = artist_portraits(&artists);
+        assert_eq!(portraits.len(), 2);
+        assert_eq!(portraits["bjork"], 40);
+        assert_eq!(portraits["the cure"], 50);
+    }
 }
