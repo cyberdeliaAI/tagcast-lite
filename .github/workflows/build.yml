@@ -6,9 +6,17 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing version tag to rebuild and publish from main'
+        type: string
+        required: false
 
 permissions:
   contents: read
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release_tag) || '' }}
 
 jobs:
   build:
@@ -29,16 +37,26 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ env.RELEASE_TAG != '' && format('refs/tags/{0}', env.RELEASE_TAG) || github.sha }}
           persist-credentials: false
       - name: Verify release version
-        if: github.ref_type == 'tag'
+        if: env.RELEASE_TAG != ''
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
-          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+          if [[ "$RELEASE_TAG" != "v$version" ]]; then
             echo "::error::The release tag must match version $version in Cargo.toml."
             exit 1
           fi
+      - name: Check out current signing script for a release retry
+        if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && env.RELEASE_TAG != ''
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: .release-tools
+          sparse-checkout: scripts/sign-macos-app.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -60,7 +78,7 @@ jobs:
         shell: bash
         run: scripts/make-macos-app.sh
       - name: Sign and notarize macOS release
-        if: runner.os == 'macOS' && github.ref_type == 'tag'
+        if: runner.os == 'macOS' && env.RELEASE_TAG != ''
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -68,7 +86,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash scripts/sign-macos-app.sh "target/release/Tagcast Lite.app"
+        run: |
+          script=scripts/sign-macos-app.sh
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            script=".release-tools/$script"
+          fi
+          bash "$script" "target/release/Tagcast Lite.app"
       - name: Package macOS app
         if: runner.os == 'macOS'
         shell: bash
@@ -78,7 +101,7 @@ jobs:
           "$app/Contents/MacOS/tagcast-player" --version
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent "$app" "dist/tagcast-lite-${{ matrix.platform }}.zip"
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+          if [[ -n "$RELEASE_TAG" ]]; then
             check=$(mktemp -d)
             trap 'rm -rf "$check"' EXIT
             ditto -x -k "dist/tagcast-lite-${{ matrix.platform }}.zip" "$check"
@@ -114,13 +137,13 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    if: (github.event_name == 'push' && github.ref_type == 'tag') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.release_tag != '')
     needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     concurrency:
-      group: release-${{ github.ref }}
+      group: release-${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -132,7 +155,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
           version="${tag#v}"
           status=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft) || status=missing
           if [[ "$status" == false ]]; then

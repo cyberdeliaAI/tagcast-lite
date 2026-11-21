@@ -20,13 +20,36 @@ security unlock-keychain -p "$password" "$keychain"
 security set-keychain-settings -lut 1800 "$keychain"
 security import "$work/certificate.p12" -k "$keychain" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
 rm "$work/certificate.p12"
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$password" "$keychain" >/dev/null
 
-identity=$(security find-identity -v -p codesigning "$keychain" | awk -v team="$APPLE_TEAM_ID" '
+# Register the signing keychain for Security.framework and install the Apple
+# Developer ID intermediates, without changing the system trust settings.
+keychains=()
+while read -r listed; do
+    listed=${listed#\"}
+    keychains+=("${listed%\"}")
+done < <(security list-keychains -d user)
+security list-keychains -d user -s "$keychain" ${keychains[@]+"${keychains[@]}"}
+for issuer in DeveloperIDCA DeveloperIDG2CA; do
+    curl --proto '=https' --fail --silent --show-error --retry 2 --max-time 30 \
+        "https://www.apple.com/certificateauthority/$issuer.cer" -o "$work/$issuer.cer"
+    fingerprint=$(openssl x509 -inform DER -in "$work/$issuer.cer" -noout -fingerprint -sha256)
+    fingerprint=${fingerprint#*=}
+    if ! grep -Fq "${fingerprint//:/}" <<< "$(security find-certificate -a -Z "$keychain")"; then
+        security import "$work/$issuer.cer" -k "$keychain" -t cert
+    fi
+done
+
+if ! identity=$(security find-identity -v -p codesigning "$keychain" | awk -v team="$APPLE_TEAM_ID" '
     /"Developer ID Application:/ && index($0, "(" team ")") { print $2; count++ }
     END { if (count != 1) exit 1 }
-')
-codesign --force --options runtime --timestamp --keychain "$keychain" --sign "$identity" "$app"
+'); then
+    echo '::error::Expected one valid Developer ID Application identity for APPLE_TEAM_ID.'
+    security find-identity -p codesigning "$keychain"
+    exit 1
+fi
+echo 'Signing with the Developer ID Application identity from the temporary keychain.'
+codesign --force --options runtime --timestamp --sign "$identity" "$app"
 codesign --verify --strict "$app"
 
 ditto -c -k --keepParent "$app" "$work/app.zip"
