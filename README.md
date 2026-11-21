@@ -14,11 +14,37 @@
 </p>
 
 Tagcast Lite brings your [iBroadcast](https://www.ibroadcast.com/) music library,
-queue and playback controls together in one native, read-only player. It needs no Python, FFmpeg,
-Electron, browser or installed media player. On macOS it uses the system audio
-output and the Keychain.
+queue and playback controls together in one native, read-only player. Downloads
+include the player and audio decoders. First-time sign-in opens in your browser.
 
-[Download the latest release](https://github.com/cyberdeliaAI/tagcast-lite/releases/latest)
+## Download and install
+
+Choose a package from the [latest GitHub release](https://github.com/cyberdeliaAI/tagcast-lite/releases/latest).
+The release includes SHA-256 checksums for the four archives.
+
+| Platform | Requirements | Install and open |
+| --- | --- | --- |
+| macOS | Apple Silicon or Intel, macOS 11 or later. Release builds are tested on macOS 15. | Extract the matching ZIP, move **Tagcast Lite.app** to Applications, and open it. Both builds are Developer ID signed and notarized by Apple. |
+| Windows | 64-bit Windows on x64 with the [Microsoft Visual C++ v14 Redistributable (x64)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist). | Extract the ZIP and open `tagcast-player.exe`. The executable is unsigned, so Windows may show a SmartScreen prompt. |
+| Linux | x86-64 with glibc 2.39 or later, a graphical desktop with OpenGL, and the ALSA, D-Bus, OpenSSL 3, and XKB runtime libraries. Ubuntu 24.04 is the release build and test environment. | Extract the TAR.GZ and run `./tagcast-player` from the extracted directory. |
+
+### Homebrew on macOS
+
+With [Homebrew](https://brew.sh/) installed, run:
+
+```sh
+brew install --cask cyberdeliaAI/apps/tagcast-lite
+```
+
+Homebrew selects the matching Mac download and verifies its checksum. Open
+**Tagcast Lite** from Applications. If you installed the app manually, quit it and
+move it aside before installing through Homebrew. To update, quit the app and run:
+
+```sh
+brew upgrade --cask cyberdeliaAI/apps/tagcast-lite
+```
+
+The cask is maintained in the [Cyberdelia Homebrew tap](https://github.com/cyberdeliaAI/homebrew-apps).
 
 ## Screenshots
 
@@ -55,10 +81,14 @@ output and the Keychain.
 
 ## Using it
 
-On first launch the window shows an iBroadcast device code. Click
+Click **Sign in with iBroadcast** to get an iBroadcast device code. Click
 **Open iBroadcast**, enter the code and approve. The player only asks for
 library and account read access. After that it opens straight into your
 library from a verified, account-bound local copy and checks iBroadcast for changes in the background. Older sign-ins are bound to their account after their first successful status response.
+
+When upgrading from 0.3.6 or earlier, sign in once to authorize Tagcast Lite's
+own iBroadcast registration. Use the same iBroadcast account to access your
+locally saved favourites, queue and listening history.
 
 - **Sidebar:** Songs, Albums, Album artists, Track artists, Queue and playlist folders. Browse by
   genre, tag or year, see favourites, or return to recently listened tracks.

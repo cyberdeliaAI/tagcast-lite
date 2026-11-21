@@ -23,7 +23,8 @@ use crate::{APP_NAME, CancellationToken, Failure, Result};
 mod album_sets;
 pub use album_sets::AlbumSet;
 
-const CLIENT_ID: &str = "5d8e2ee2bfee11f1b50eb49691aa2236";
+// Public OAuth identifier for Tagcast Lite's own iBroadcast registration.
+const CLIENT_ID: &str = "cbd63f6de5f511f1b50eb49691aa2236";
 const SCOPES: &str = "user.library:read user.account:read";
 const OAUTH: &str = "https://oauth.ibroadcast.com";
 #[cfg(any(target_os = "macos", target_os = "windows"))]
