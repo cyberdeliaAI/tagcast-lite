@@ -118,6 +118,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force dist/package | Out-Null
           Copy-Item target/release/tagcast-player.exe,README.md,LICENSE,assets/fonts/Inter-LICENSE.txt -Destination dist/package
+          Copy-Item assets/themes/ATTRIBUTION.txt -Destination dist/package/Theme-Attribution.txt
           Compress-Archive -Path dist/package/* -DestinationPath "dist/tagcast-lite-${{ matrix.platform }}.zip"
       - name: Package Linux build
         if: runner.os == 'Linux'
@@ -127,6 +128,7 @@ jobs:
           target/release/tagcast-player --version
           mkdir -p dist/package
           cp target/release/tagcast-player README.md LICENSE assets/fonts/Inter-LICENSE.txt dist/package/
+          cp assets/themes/ATTRIBUTION.txt dist/package/Theme-Attribution.txt
           tar -czf "dist/tagcast-lite-${{ matrix.platform }}.tar.gz" -C dist/package .
       - uses: actions/upload-artifact@v7
         with:

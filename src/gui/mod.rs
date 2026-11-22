@@ -1,5 +1,6 @@
 //! The desktop window: sign-in, library browser, queue and now-playing bar.
 
+mod appearance;
 mod artwork;
 mod catalog;
 mod listening;
@@ -260,6 +261,7 @@ pub enum Action {
     SetShuffle(bool),
     CycleRepeat,
     SetQuality(Quality),
+    OpenSettings,
     Reload,
     SignOut,
     ToggleFavourite(u64),
@@ -322,6 +324,8 @@ enum Stage {
 }
 
 pub struct App {
+    appearance: appearance::Preferences,
+    settings_window: appearance::SettingsWindow,
     client_id: Option<String>,
     ctx: egui::Context,
     send: Sender<(u64, Message)>,
@@ -369,6 +373,11 @@ pub struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, options: Options) -> Self {
         theme::install(&cc.egui_ctx);
+        let appearance: appearance::Preferences = cc
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "appearance"))
+            .unwrap_or_default();
+        appearance.apply(&cc.egui_ctx);
         let settings: Settings = cc
             .storage
             .and_then(|s| eframe::get_value(s, "settings"))
@@ -397,6 +406,8 @@ impl App {
         });
         let (send, receive) = channel();
         let mut app = Self {
+            appearance,
+            settings_window: appearance::SettingsWindow::default(),
             client_id: options.client_id,
             ctx: cc.egui_ctx.clone(),
             send,
@@ -957,6 +968,10 @@ impl App {
                     self.notify(format!("Streaming quality: {}", quality_label(quality)));
                 }
             }
+            Action::OpenSettings => {
+                self.settings_window.open(appearance::Section::Playback);
+                self.ctx.request_repaint();
+            }
             Action::Reload => {
                 if self.loading.is_none() {
                     self.notify("Reloading the library…");
@@ -1258,11 +1273,15 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        let colors = theme::colors(&ctx);
         self.art.begin_frame();
         if let Stage::SignIn { .. } = self.stage {
             if let Some(action) = self.sign_in(ui) {
                 match action {
                     SignInAction::Start => self.connect(),
+                    SignInAction::Settings => {
+                        self.settings_window.open(appearance::Section::Appearance)
+                    }
                     SignInAction::Reset => {
                         self.session.close();
                         if let Err(error) = logout(self.client_id.clone()) {
@@ -1284,31 +1303,48 @@ impl eframe::App for App {
                     }
                 }
             }
+            let mut actions = Vec::new();
+            self.show_settings(&ctx, &mut actions);
+            for action in actions {
+                self.apply(action);
+            }
             return;
         }
-        let mut actions = self.keyboard(&ctx);
+        let mut actions = if self.settings_window.open {
+            Vec::new()
+        } else {
+            self.keyboard(&ctx)
+        };
         egui::Panel::bottom("now-playing")
             .exact_size(86.0)
             .resizable(false)
             .show_separator_line(false)
-            .frame(theme::panel(theme::BAR, Margin::symmetric(16, 10)))
+            .frame(theme::panel(colors.bar, Margin::symmetric(16, 10)))
             .show(ui, |ui| self.now_playing(ui, &mut actions));
         egui::Panel::left("sidebar")
             .exact_size(228.0)
             .resizable(false)
             .show_separator_line(false)
-            .frame(theme::panel(theme::SIDEBAR, Margin::symmetric(12, 14)))
+            .frame(theme::panel(
+                colors.sidebar,
+                Margin {
+                    left: 12,
+                    right: 12,
+                    top: 14,
+                    bottom: 5,
+                },
+            ))
             .show(ui, |ui| self.sidebar(ui, &mut actions));
         if self.settings.queue_panel && self.page != Page::Queue && ui.available_width() >= 680.0 {
             egui::Panel::right("queue-preview")
                 .default_size(236.0)
                 .resizable(true)
-                .frame(theme::panel(theme::SIDEBAR, Margin::symmetric(12, 14)))
+                .frame(theme::panel(colors.sidebar, Margin::symmetric(12, 14)))
                 .show(ui, |ui| self.queue_preview(ui, &mut actions));
         }
         egui::CentralPanel::default()
             .frame(theme::panel(
-                theme::BG,
+                colors.bg,
                 Margin {
                     left: 26,
                     right: 18,
@@ -1318,6 +1354,7 @@ impl eframe::App for App {
             ))
             .show(ui, |ui| self.main(ui, &mut actions));
         self.toast(&ctx);
+        self.show_settings(&ctx, &mut actions);
         for action in actions {
             self.apply(action);
         }
@@ -1325,32 +1362,57 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "settings", &self.settings);
+        eframe::set_value(storage, "appearance", &self.appearance);
     }
 
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        theme::BG.to_normalized_gamma_f32()
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        visuals.panel_fill.to_normalized_gamma_f32()
     }
 }
 
 enum SignInAction {
     Start,
+    Settings,
     Cancel,
     Reset,
 }
 
 impl App {
+    fn show_settings(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let state = appearance::SettingsState {
+            quality: self.settings.quality(),
+            premium: self
+                .catalog
+                .as_ref()
+                .is_some_and(|catalog| catalog.library.premium),
+            gapless: self.settings.gapless,
+            signed_in: self.source.is_some(),
+            loading: self.loading.is_some(),
+        };
+        self.settings_window
+            .show(ctx, &mut self.appearance, state, actions);
+    }
+
     fn show_ibroadcast_badge(&self, ui: &mut egui::Ui, width: f32) {
         if let Some(badge) = &self.ibroadcast_badge {
             let size = badge.size_vec2();
-            ui.add(
-                egui::Image::new(badge)
-                    .fit_to_exact_size(egui::vec2(width, width * size.y / size.x))
-                    .alt_text("Powered by iBroadcast"),
-            );
+            let image = egui::Image::new(badge)
+                .fit_to_exact_size(egui::vec2(width, width * size.y / size.x))
+                .alt_text("Powered by iBroadcast");
+            if ui.visuals().dark_mode {
+                ui.add(image);
+            } else {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_rgb(16, 20, 30))
+                    .inner_margin(2)
+                    .corner_radius(4)
+                    .show(ui, |ui| ui.add(image));
+            }
         }
     }
 
     fn sign_in(&mut self, ui: &mut egui::Ui) -> Option<SignInAction> {
+        let colors = theme::colors(ui.ctx());
         let Stage::SignIn {
             code, error, busy, ..
         } = &self.stage
@@ -1359,16 +1421,16 @@ impl App {
         };
         let mut action = None;
         egui::CentralPanel::default()
-            .frame(theme::panel(theme::BG, 0))
+            .frame(theme::panel(colors.bg, 0))
             .show(ui, |ui| {
-                let card = egui::vec2(420.0, 420.0);
+                let card = egui::vec2(420.0, 458.0);
                 let rect = egui::Rect::from_center_size(ui.max_rect().center(), card);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                     egui::Frame::new()
-                        .fill(theme::SURFACE)
+                        .fill(colors.surface)
                         .corner_radius(14)
                         .inner_margin(28)
-                        .stroke(egui::Stroke::new(1.0, theme::LINE))
+                        .stroke(egui::Stroke::new(1.0, colors.line))
                         .show(ui, |ui| {
                             ui.set_width(card.x - 56.0);
                             ui.vertical_centered(|ui| {
@@ -1376,16 +1438,16 @@ impl App {
                                     ui.add(egui::Image::new(logo).fit_to_exact_size(egui::Vec2::splat(64.0)));
                                 }
                                 ui.add_space(6.0);
-                                ui.label(RichText::new(APP_NAME).font(theme::strong(22.0)).color(theme::TEXT));
-                                ui.label(RichText::new("An independent player for your iBroadcast library").color(theme::MUTED));
+                                ui.label(RichText::new(APP_NAME).font(theme::strong(22.0)).color(colors.text));
+                                ui.label(RichText::new("An independent player for your iBroadcast library").color(colors.muted));
                                 ui.add_space(4.0);
                                 self.show_ibroadcast_badge(ui, 128.0);
                                 ui.add_space(18.0);
                                 match (code, busy) {
                                     (Some((uri, user_code)), true) => {
-                                        ui.label(RichText::new("Open iBroadcast and enter this code").color(theme::MUTED));
+                                        ui.label(RichText::new("Open iBroadcast and enter this code").color(colors.muted));
                                         ui.add_space(6.0);
-                                        ui.label(RichText::new(user_code).font(theme::strong(32.0)).color(theme::CREAM));
+                                        ui.label(RichText::new(user_code).font(theme::strong(32.0)).color(colors.play));
                                         ui.add_space(12.0);
                                         ui.horizontal(|ui| {
                                             let width = 2.0 * 150.0 + 8.0;
@@ -1401,7 +1463,7 @@ impl App {
                                         ui.horizontal(|ui| {
                                             ui.add_space((ui.available_width() - 190.0).max(0.0) / 2.0);
                                             ui.spinner();
-                                            ui.label(RichText::new("Waiting for approval…").color(theme::MUTED));
+                                            ui.label(RichText::new("Waiting for approval…").color(colors.muted));
                                         });
                                         ui.add_space(6.0);
                                         if ui.link("Cancel").clicked() {
@@ -1411,15 +1473,15 @@ impl App {
                                     (None, true) => {
                                         ui.add_space(30.0);
                                         ui.spinner();
-                                        ui.label(RichText::new("Connecting to iBroadcast…").color(theme::MUTED));
+                                        ui.label(RichText::new("Connecting to iBroadcast…").color(colors.muted));
                                     }
                                     (_, false) => {
                                         if let Some(error) = error {
                                             let error = error.to_string();
-                                            ui.label(RichText::new(error).color(theme::ERROR));
+                                            ui.label(RichText::new(error).color(colors.error));
                                             ui.add_space(10.0);
                                         } else {
-                                            ui.label(RichText::new("Sign in once with a device code. The player only reads your library.").color(theme::MUTED));
+                                            ui.label(RichText::new("Sign in once with a device code. The player only reads your library.").color(colors.muted));
                                             ui.add_space(10.0);
                                         }
                                         if theme::pill(ui, None, "Sign in with iBroadcast", true).clicked() {
@@ -1428,11 +1490,15 @@ impl App {
                                         // A stored sign-in that cannot be used; a network problem needs no reset.
                                         if error.as_ref().is_some_and(|e| !e.temporary()) {
                                             ui.add_space(8.0);
-                                            if ui.link(RichText::new("Forget the stored sign-in and start over").color(theme::MUTED)).clicked() {
+                                            if ui.link(RichText::new("Forget the stored sign-in and start over").color(colors.muted)).clicked() {
                                                 action = Some(SignInAction::Reset);
                                             }
                                         }
                                     }
+                                }
+                                ui.add_space(4.0);
+                                if ui.link("Appearance settings").clicked() {
+                                    action = Some(SignInAction::Settings);
                                 }
                             });
                         });
@@ -1442,6 +1508,7 @@ impl App {
     }
 
     fn toast(&mut self, ctx: &egui::Context) {
+        let colors = theme::colors(ctx);
         let Some((text, at)) = &self.toast else {
             return;
         };
@@ -1454,11 +1521,11 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_max_width(screen.width() * 0.6);
                 egui::Frame::new()
-                    .fill(theme::SURFACE_HI.gamma_multiply(fade))
+                    .fill(colors.surface_hi.gamma_multiply(fade))
                     .corner_radius(10)
                     .inner_margin(Margin::symmetric(16, 10))
                     .show(ui, |ui| {
-                        ui.label(RichText::new(text).color(theme::TEXT.gamma_multiply(fade)));
+                        ui.label(RichText::new(text).color(colors.text.gamma_multiply(fade)));
                     });
             });
     }

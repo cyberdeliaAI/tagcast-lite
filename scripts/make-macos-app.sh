@@ -19,6 +19,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$build_dir/release/tagcast-player" "$app/Contents/MacOS/tagcast-player"
 cp LICENSE README.md assets/fonts/Inter-LICENSE.txt "$app/Contents/Resources/"
+cp assets/themes/ATTRIBUTION.txt "$app/Contents/Resources/Theme-Attribution.txt"
 
 iconset="$work/AppIcon.iconset"
 mkdir -p "$iconset"

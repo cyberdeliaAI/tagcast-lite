@@ -100,6 +100,7 @@ locally saved favourites, queue and listening history.
   Click Name again to reverse the order, or Random to reshuffle.
 - **Albums:** click a cover to open it. Hover a cover and click its
   play button to play it right away.
+  Click a genre on the album page to browse the albums in that genre.
   Multi-disc sets have one cover and a
   section for each disc. Play follows disc and track order. Lite uses combined
   sets returned by iBroadcast and can group matching separate discs locally.
@@ -121,11 +122,24 @@ locally saved favourites, queue and listening history.
 - **Listening:** the queue is restored per account and waits for Play. The
   player records tracks locally after ten seconds of output. Mark local album
   favourites on the album page.
-- **Quality:** 128 kbps is the default. With Premium, the menu at the bottom
-  left offers 96, 192, 256 and 320 kbps and Original. A change restarts the
-  current track at the same position.
+- **Quality:** 128 kbps is the default. With Premium, **Settings → Playback**
+  offers 96, 192, 256 and 320 kbps and Original. A change restarts the current
+  track at the same position.
 
 Volume, quality, shuffle, repeat, album and artist sort, and the window size are remembered.
+
+### Settings
+
+Click **⋯** next to your plan at the bottom of the sidebar to open Settings.
+**Playback** has streaming quality, gapless playback and audio output controls.
+**Reload library** and **Sign out** are at the bottom of the window.
+
+Choose **Appearance** to switch between Dark, Light and System and pick a colour
+theme. The original Lite style, Tagcast's six built-in palettes, and the eleven
+themes from the Tagcast theme pack are included. **Create a copy** opens the
+theme editor. Edit and preview the Light
+and Dark colours independently, then save a custom theme. Theme settings are
+stored locally. See the [theme attributions](assets/themes/ATTRIBUTION.txt).
 
 ### Keyboard
 
@@ -145,7 +159,7 @@ On Linux, use Ctrl instead of ⌘.
 
 `--client-id ID` (or `IBROADCAST_CLIENT_ID`) selects a custom public OAuth
 client. `--logout` removes the player's stored sign-in and library snapshot for
-that client. **Sign out** in the ⋯ menu at the bottom left does the same from
+that client. **Sign out** at the bottom of Settings does the same from
 the window. The full Tagcast app uses separate credentials and settings.
 
 ## Playback
@@ -160,13 +174,13 @@ one automatic recovery for the current track. Original may switch to 128 kbps
 when the source or decoder rejects that format. The now-playing bar shows the
 stream in use and any switch.
 
-The sidebar menu offers an experimental **Gapless · Original FLAC** choice,
+**Settings → Playback** offers experimental **Gapless playback**,
 off by default. It applies to ordered album playback with compatible mono or
 stereo FLAC tracks. The first track starts immediately. A bounded lookahead
 prepares the following track and uses the same output and resampler through the
 boundary. An unavailable or incompatible next track uses the ordinary transition.
-The stream badge shows the decoded and output rates. Use **Reconnect audio
-output** after switching speakers, headphones or a DAC. This opens the current
+The stream badge shows the decoded and output rates. Use **Audio output →
+Reconnect** in Playback after switching speakers, headphones or a DAC. This opens the current
 system output and leaves the track paused at its current position.
 
 ## Build and check

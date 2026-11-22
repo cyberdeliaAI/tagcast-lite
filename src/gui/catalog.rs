@@ -18,6 +18,7 @@ pub struct Album {
     pub discs: Vec<DiscSection>,
     pub seconds: f64,
     pub search: String,
+    genre_indices: Vec<usize>,
     sort_artist: String,
     sort_name: String,
     added: u64,
@@ -46,6 +47,7 @@ impl Album {
             discs: Vec::new(),
             seconds: 0.0,
             search: String::new(),
+            genre_indices: Vec::new(),
             sort_artist: String::new(),
             sort_name: String::new(),
             added,
@@ -262,6 +264,7 @@ pub struct Catalog {
     pub albums: Vec<Album>,
     pub album_index: HashMap<u64, usize>,
     set_by_track: HashMap<u64, usize>,
+    genre_labels: Vec<String>,
     pub artists: Vec<Artist>,
     artist_index: HashMap<String, usize>,
     artist_counts: [usize; 2],
@@ -511,7 +514,8 @@ impl Catalog {
             .enumerate()
             .map(|(index, list)| (list.id, index))
             .collect();
-        Self {
+        let mut catalog = Self {
+            genre_labels: library.genres.keys().cloned().collect(),
             library,
             by_id,
             playlists_by_id,
@@ -525,7 +529,33 @@ impl Catalog {
             total_seconds,
             album_orders: HashMap::new(),
             song_orders: HashMap::new(),
+        };
+        catalog.index_album_genres();
+        catalog
+    }
+
+    fn index_album_genres(&mut self) {
+        for (genre, ids) in self.library.genres.values().enumerate() {
+            for &id in ids {
+                let Some(album) = self
+                    .track_index(id)
+                    .and_then(|index| self.album_slot(self.track(index)))
+                else {
+                    continue;
+                };
+                let genres = &mut self.albums[album].genre_indices;
+                if genres.last() != Some(&genre) {
+                    genres.push(genre);
+                }
+            }
         }
+    }
+
+    pub fn album_genres(&self, index: usize) -> impl ExactSizeIterator<Item = &str> {
+        self.albums[index]
+            .genre_indices
+            .iter()
+            .map(|&genre| self.genre_labels[genre].as_str())
     }
 
     pub fn playlist_index(&self, id: u64) -> Option<usize> {
@@ -894,7 +924,8 @@ mod tests {
                     "102": {"title":"Two", "artist_id":1, "album_id":10, "track":2, "file":"/128/a/102",
                             "uploaded_on":"2020-06-01", "artwork_id":12},
                     "201": {"title":"Three", "artist_id":1, "album_id":20, "track":1, "file":"/128/a/201",
-                            "uploaded_on":"2020-06-01", "artwork_id":21, "genre":"Rock"},
+                            "uploaded_on":"2020-06-01", "artwork_id":21, "genre":"Rock",
+                            "genres_additional":["Soul"]},
                     "202": {"title":"Four", "artist_id":1, "album_id":20, "track":2, "file":"/128/a/202",
                             "uploaded_on":"2020-06-01"}
                 },
@@ -952,6 +983,10 @@ mod tests {
         let after = catalog.track(catalog.track_index(201).unwrap());
         assert_ne!(before.album_id, after.album_id);
         assert_eq!(catalog.album_slot(before), catalog.album_slot(after));
+        assert_eq!(
+            catalog.album_genres(0).collect::<Vec<_>>(),
+            ["Rock", "Soul"]
+        );
         assert_eq!(catalog.search("one album").albums.len(), 1);
         for kind in [BrowseKind::Genres, BrowseKind::Tags, BrowseKind::Years] {
             assert_eq!(catalog.groups(kind)[0].albums, 1);
@@ -1026,6 +1061,14 @@ mod tests {
             );
             assert_eq!(track_ids(&catalog, album), [101, 102, 201, 202]);
             assert_eq!(catalog.album_index[&20], 0);
+            assert_eq!(
+                catalog.album_genres(0).collect::<Vec<_>>(),
+                ["Rock", "Soul"]
+            );
+            assert_eq!(
+                catalog.group_album_slots(&BrowseGroup::Genre("Soul".into())),
+                HashSet::from([0])
+            );
             assert_eq!(catalog.groups(BrowseKind::Years)[0].tracks, 4);
         }
     }
@@ -1201,6 +1244,10 @@ mod tests {
         let catalog = sample();
         let cure = catalog.album_index[&10];
         let debut = catalog.album_index[&20];
+        assert_eq!(
+            catalog.album_genres(cure).collect::<Vec<_>>(),
+            ["Pop;Rock", "Rock"]
+        );
         assert_eq!(
             catalog.group_album_slots(&BrowseGroup::Genre("Pop;Rock".into())),
             HashSet::from([cure]),

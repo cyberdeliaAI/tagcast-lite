@@ -6,16 +6,11 @@ use eframe::egui::{
     self, Align, Align2, Color32, CornerRadius, CursorIcon, Id, Layout, Rangef, Rect, RichText,
     Sense, Stroke, Ui, UiBuilder, Vec2, pos2, vec2,
 };
-use tagcast_player::{
-    APP_NAME, Failure,
-    account::Track,
-    audio::Phase,
-    transport::{Quality, Route},
-};
+use tagcast_player::{APP_NAME, Failure, account::Track, audio::Phase, transport::Route};
 
 use super::Collection;
 use super::{
-    Action, App, BrowseAlbumRows, Page, QUALITIES, Repeat,
+    Action, App, BrowseAlbumRows, Page, Repeat,
     artwork::Artwork,
     catalog::{
         self, AlbumSort, Artist, ArtistRole, ArtistSort, BrowseGroup, BrowseKind, BrowseSort,
@@ -109,6 +104,7 @@ struct RowState {
 }
 
 fn header_row(ui: &mut Ui, style: ListStyle, sort: Option<(SongSort, bool)>) -> Option<SongSort> {
+    let colors = theme::colors(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
     let cols = Columns::new(rect.left() + 8.0, rect.width() - 16.0, style);
     let mut clicked = None;
@@ -134,9 +130,9 @@ fn header_row(ui: &mut Ui, style: ListStyle, sort: Option<(SongSort, bool)>) -> 
         });
         let hovered = response.as_ref().is_some_and(|(_, r)| r.hovered());
         let color = if hovered || !arrow.is_empty() {
-            theme::TEXT
+            colors.text
         } else {
-            theme::FAINT
+            colors.faint
         };
         let align = if right {
             Align2::RIGHT_CENTER
@@ -164,7 +160,7 @@ fn header_row(ui: &mut Ui, style: ListStyle, sort: Option<(SongSort, bool)>) -> 
     ui.painter().hline(
         rect.x_range(),
         rect.bottom() - 0.5,
-        Stroke::new(1.0, theme::LINE),
+        Stroke::new(1.0, colors.line),
     );
     clicked
 }
@@ -180,6 +176,7 @@ fn track_row(
     album_name: Option<&str>,
     events: &mut Vec<RowEvent>,
 ) {
+    let colors = theme::colors(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
     if !ui.is_rect_visible(rect) {
         return;
@@ -189,11 +186,11 @@ fn track_row(
     let cols = Columns::new(rect.left() + 8.0, rect.width() - 16.0, style);
     let painter = ui.painter().clone();
     let fill = if state.selected {
-        theme::SURFACE_HI
+        colors.surface_hi
     } else if hovered {
-        theme::SURFACE
+        colors.surface
     } else if state.current {
-        theme::ACCENT.gamma_multiply(0.10)
+        colors.accent.gamma_multiply(0.10)
     } else {
         Color32::TRANSPARENT
     };
@@ -201,16 +198,16 @@ fn track_row(
     let y = rect.center().y;
     let font = regular(13.5);
     let (text, muted) = if state.dim {
-        (theme::MUTED, theme::FAINT)
+        (colors.muted, colors.faint)
     } else {
-        (theme::TEXT, theme::MUTED)
+        (colors.text, colors.muted)
     };
 
     // Number, or a play button while hovered, or the playing indicator.
     let number_rect = Rect::from_x_y_ranges(cols.number, rect.y_range());
     let icon_rect = Rect::from_center_size(pos2(number_rect.left() + 11.0, y), Vec2::splat(15.0));
     if state.current && state.playing && !hovered {
-        paint_icon(&painter, icon_rect, Icon::Bars, theme::ACCENT_TEXT);
+        paint_icon(&painter, icon_rect, Icon::Bars, colors.accent_text);
     } else if hovered {
         let play = ui.interact(number_rect, id.with("play"), Sense::click());
         paint_icon(
@@ -222,9 +219,9 @@ fn track_row(
                 Icon::Play
             },
             if play.hovered() {
-                theme::CREAM
+                colors.play
             } else {
-                theme::TEXT
+                colors.text
             },
         );
         if play.on_hover_cursor(CursorIcon::PointingHand).clicked() {
@@ -242,15 +239,15 @@ fn track_row(
             label,
             regular(12.5),
             if state.current {
-                theme::ACCENT_TEXT
+                colors.accent_text
             } else {
-                theme::FAINT
+                colors.faint
             },
         );
     }
 
     let title_color = if state.current {
-        theme::ACCENT_TEXT
+        colors.accent_text
     } else {
         text
     };
@@ -338,7 +335,7 @@ fn track_row(
             &mut child,
             Icon::Close,
             24.0,
-            theme::MUTED,
+            colors.muted,
             "Remove from queue",
         )
         .clicked()
@@ -411,6 +408,7 @@ fn list_row(sections: &[DiscSection], display_row: usize) -> ListRow {
 }
 
 fn disc_heading(ui: &mut Ui, number: u64) {
+    let colors = theme::colors(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::hover());
     let label = if number == 0 {
         "Disc · number unknown".into()
@@ -422,10 +420,10 @@ fn disc_heading(ui: &mut Ui, number: u64) {
         Align2::LEFT_CENTER,
         label,
         strong(12.5),
-        theme::MUTED,
+        colors.muted,
     );
     ui.painter()
-        .hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, theme::LINE));
+        .hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, colors.line));
 }
 
 /// A virtualised list of library tracks. Row events refer to positions in `rows`.
@@ -542,6 +540,7 @@ fn album_tile(
     playing_album: Option<u64>,
     events: &mut Vec<TileEvent>,
 ) {
+    let colors = theme::colors(ui.ctx());
     let album = &catalog.albums[album_index];
     let id = ui.scope_id().with(("album-tile", album.id));
     let response = ui.interact(rect, id, Sense::click());
@@ -568,9 +567,9 @@ fn album_tile(
         &album.name,
         strong(13.0),
         if current {
-            theme::ACCENT_TEXT
+            colors.accent_text
         } else {
-            theme::TEXT
+            colors.text
         },
         rect.width(),
     );
@@ -584,7 +583,7 @@ fn album_tile(
         pos2(rect.left(), y + 19.0),
         &sub,
         regular(12.0),
-        theme::MUTED,
+        colors.muted,
         rect.width(),
     );
 
@@ -593,9 +592,9 @@ fn album_tile(
         let button = Rect::from_center_size(center, Vec2::splat(40.0));
         let play = ui.interact(button, id.with("play"), Sense::click());
         let fill = if play.hovered() {
-            theme::ACCENT_HI
+            colors.accent_hi
         } else {
-            theme::ACCENT
+            colors.accent
         };
         let painter = ui.painter();
         painter.circle_filled(center + vec2(0.0, 2.0), 21.0, Color32::from_black_alpha(90));
@@ -604,7 +603,7 @@ fn album_tile(
             painter,
             Rect::from_center_size(center + vec2(1.5, 0.0), Vec2::splat(18.0)),
             Icon::Play,
-            theme::CREAM,
+            theme::control_ink(colors.on_accent, fill),
         );
         if play.on_hover_text("Play").clicked() {
             events.push(TileEvent::Play(album_index, false));
@@ -664,6 +663,7 @@ struct AlbumGrid {
 }
 
 fn group_card(ui: &mut Ui, rect: Rect, group: &GroupSummary) -> bool {
+    let colors = theme::colors(ui.ctx());
     let id = ui.make_persistent_id(("browse-group", &group.name));
     let response = ui.interact(rect, id, Sense::click());
     let albums = count(group.albums, "album", "albums");
@@ -681,29 +681,29 @@ fn group_card(ui: &mut Ui, rect: Rect, group: &GroupSummary) -> bool {
         rect,
         CornerRadius::same(10),
         if active {
-            theme::SURFACE_HI
+            colors.surface_hi
         } else {
-            theme::SURFACE
+            colors.surface
         },
         Stroke::new(
             1.0,
             if active {
-                theme::ACCENT_TEXT
+                colors.accent_text
             } else {
-                theme::LINE
+                colors.line
             },
         ),
         egui::StrokeKind::Inside,
     );
     let right = rect.right() - 13.0;
     let center = rect.center().y;
-    let albums = painter.layout_no_wrap(albums, regular(12.0), theme::MUTED);
-    let tracks = painter.layout_no_wrap(tracks, regular(11.5), theme::MUTED);
+    let albums = painter.layout_no_wrap(albums, regular(12.0), colors.muted);
+    let tracks = painter.layout_no_wrap(tracks, regular(11.5), colors.muted);
     let label_width = rect.width() - 40.0 - albums.size().x.max(tracks.size().x);
     let top = center - 9.0 - albums.size().y / 2.0;
     let bottom = center + 9.0 - tracks.size().y / 2.0;
-    painter.galley(pos2(right - albums.size().x, top), albums, theme::MUTED);
-    painter.galley(pos2(right - tracks.size().x, bottom), tracks, theme::MUTED);
+    painter.galley(pos2(right - albums.size().x, top), albums, colors.muted);
+    painter.galley(pos2(right - tracks.size().x, bottom), tracks, colors.muted);
     let font = strong(15.0);
     let name_height = painter.fonts_mut(|f| f.row_height(&font));
     clipped(
@@ -711,7 +711,7 @@ fn group_card(ui: &mut Ui, rect: Rect, group: &GroupSummary) -> bool {
         pos2(rect.left() + 13.0, center - name_height / 2.0),
         &group.name,
         font,
-        theme::TEXT,
+        colors.text,
         label_width.max(0.0),
     );
     response
@@ -729,6 +729,7 @@ fn album_grid(
     playing_album: Option<u64>,
     actions: &mut Vec<Action>,
 ) {
+    let colors = theme::colors(ui.ctx());
     let width = ui.available_width() - 4.0;
     let (columns, tile, gap) = grid_metrics(width, 172.0);
     let row_height = tile + if display.detail.is_some() { 66.0 } else { 54.0 };
@@ -768,7 +769,7 @@ fn album_grid(
                                 pos2(x, rect.top() + tile + 44.0),
                                 &detail,
                                 regular(11.5),
-                                theme::MUTED,
+                                colors.muted,
                                 tile,
                             );
                         }
@@ -819,20 +820,22 @@ fn page_title(
     subtitle: &str,
     actions: &mut Vec<Action>,
 ) {
+    let colors = theme::colors(ui.ctx());
     ui.horizontal(|ui| {
-        if can_go_back && theme::icon_button(ui, Icon::Back, 30.0, theme::MUTED, "Back").clicked() {
+        if can_go_back && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked() {
             actions.push(Action::Back);
         }
-        ui.label(RichText::new(title).font(strong(26.0)).color(theme::TEXT));
+        ui.label(RichText::new(title).font(strong(26.0)).color(colors.text));
         if !subtitle.is_empty() {
             ui.add_space(4.0);
-            ui.label(RichText::new(subtitle).color(theme::MUTED));
+            ui.label(RichText::new(subtitle).color(colors.muted));
         }
     });
 }
 
 /// Play, Shuffle and a menu with the queue commands. `rtl` is for right-to-left layouts.
 fn play_buttons(ui: &mut Ui, tracks: &[usize], actions: &mut Vec<Action>, rtl: bool) {
+    let colors = theme::colors(ui.ctx());
     let enabled = !tracks.is_empty();
     ui.add_enabled_ui(enabled, |ui| {
         let mut order = [0, 1, 2];
@@ -865,7 +868,7 @@ fn play_buttons(ui: &mut Ui, tracks: &[usize], actions: &mut Vec<Action>, rtl: b
                         ui,
                         Icon::More,
                         34.0,
-                        theme::MUTED,
+                        colors.muted,
                         "More",
                     ))
                 }
@@ -891,16 +894,17 @@ fn play_buttons(ui: &mut Ui, tracks: &[usize], actions: &mut Vec<Action>, rtl: b
 }
 
 fn centered_message(ui: &mut Ui, spinner: bool, title: &str, body: &str) {
+    let colors = theme::colors(ui.ctx());
     ui.vertical_centered(|ui| {
         ui.add_space((ui.available_height() * 0.32).max(20.0));
         if spinner {
-            ui.add(egui::Spinner::new().size(28.0).color(theme::ACCENT_TEXT));
+            ui.add(egui::Spinner::new().size(28.0).color(colors.accent_text));
             ui.add_space(10.0);
         }
-        ui.label(RichText::new(title).font(strong(17.0)).color(theme::TEXT));
+        ui.label(RichText::new(title).font(strong(17.0)).color(colors.text));
         if !body.is_empty() {
             ui.add_space(2.0);
-            ui.label(RichText::new(body).color(theme::MUTED));
+            ui.label(RichText::new(body).color(colors.muted));
         }
         ui.add_space(12.0);
     });
@@ -924,31 +928,40 @@ impl App {
     // ---- sidebar ----------------------------------------------------------
 
     pub(super) fn sidebar(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         ui.horizontal(|ui| {
             ui.add_space(4.0);
             if let Some(logo) = &self.logo {
-                ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(28.0)));
+                ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(36.0)));
             }
-            ui.label(
-                RichText::new(APP_NAME)
-                    .font(strong(15.5))
-                    .color(theme::TEXT),
-            );
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(
+                    RichText::new(APP_NAME)
+                        .font(strong(15.5))
+                        .color(colors.text),
+                );
+                ui.label(
+                    RichText::new("Player for iBroadcast")
+                        .font(regular(10.5))
+                        .color(colors.muted),
+                );
+            });
         });
         ui.add_space(14.0);
 
         // Search
         let search_frame = egui::Frame::new()
-            .fill(theme::SURFACE)
+            .fill(colors.surface)
             .corner_radius(8)
             .inner_margin(egui::Margin::symmetric(8, 3));
         search_frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 let (rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                paint_icon(ui.painter(), rect, Icon::Search, theme::MUTED);
+                paint_icon(ui.painter(), rect, Icon::Search, colors.muted);
                 let clear_width = if self.query.is_empty() { 0.0 } else { 30.0 };
                 let edit = egui::TextEdit::singleline(&mut self.query)
-                    .hint_text(RichText::new("Search").color(theme::FAINT))
+                    .hint_text(RichText::new("Search").color(colors.faint))
                     .frame(egui::Frame::NONE)
                     .margin(egui::Margin::symmetric(2, 6))
                     .align(Align2::LEFT_CENTER)
@@ -959,7 +972,7 @@ impl App {
                     self.search_focus = false;
                 }
                 if !self.query.is_empty()
-                    && theme::icon_button(ui, Icon::Close, 20.0, theme::MUTED, "Clear").clicked()
+                    && theme::icon_button(ui, Icon::Close, 20.0, colors.muted, "Clear").clicked()
                 {
                     self.query.clear();
                     if self.page == Page::Search {
@@ -1027,7 +1040,7 @@ impl App {
             ),
         ];
 
-        let footer_height = 73.0
+        let footer_height = 37.0
             + if self.audio_error.is_some() {
                 20.0
             } else {
@@ -1056,7 +1069,7 @@ impl App {
                 section_label(ui, "PLAYLISTS");
                 if let Some(catalog) = catalog {
                     if catalog.library.playlists.is_empty() {
-                        ui.label(RichText::new("  No playlists").color(theme::FAINT));
+                        ui.label(RichText::new("  No playlists").color(colors.faint));
                     } else {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         for (index, playlist) in catalog.library.playlists.iter().enumerate() {
@@ -1084,93 +1097,18 @@ impl App {
     }
 
     fn sidebar_footer(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         ui.painter().hline(
             ui.max_rect().x_range(),
             ui.max_rect().top(),
-            Stroke::new(1.0, theme::LINE),
+            Stroke::new(1.0, colors.line),
         );
-        ui.add_space(10.0);
+        ui.add_space(8.0);
         let premium = self.catalog.as_ref().is_some_and(|c| c.library.premium);
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Quality").color(theme::MUTED));
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let more = theme::icon_button(ui, Icon::More, 28.0, theme::MUTED, "");
-                egui::Popup::menu(&more).show(|ui| {
-                    ui.set_min_width(200.0);
-                    let reload = if self.loading.is_some() {
-                        "Reloading…"
-                    } else {
-                        "Reload library"
-                    };
-                    if ui
-                        .add_enabled(
-                            self.loading.is_none(),
-                            egui::Button::new(reload).shortcut_text(if cfg!(target_os = "macos") {
-                                "⌘R"
-                            } else {
-                                "Ctrl+R"
-                            }),
-                        )
-                        .clicked()
-                    {
-                        actions.push(Action::Reload);
-                    }
-                    ui.separator();
-                    let mut gapless = self.settings.gapless;
-                    let status = if gapless { "On" } else { "Off" };
-                    let changed = ui.scope(|ui| {
-                        let widgets = &mut ui.visuals_mut().widgets;
-                        let border = Stroke::new(1.0, theme::MUTED);
-                        widgets.inactive.bg_stroke = border;
-                        widgets.hovered.bg_stroke = border;
-                        widgets.active.bg_stroke = border;
-                        widgets.open.bg_stroke = border;
-                        ui.checkbox(&mut gapless, format!("Gapless · Original FLAC · {status}"))
-                            .on_hover_text("Play compatible Original FLAC albums without gaps in album order.")
-                            .changed()
-                    }).inner;
-                    if changed {
-                        actions.push(Action::ToggleGapless);
-                    }
-                    if ui.button("Reconnect audio output")
-                        .on_hover_text("Use the system’s current speakers, headphones or DAC. The track stays paused at its current position.")
-                        .clicked()
-                    {
-                        actions.push(Action::RecoverOutput);
-                    }
-                    ui.separator();
-                    if ui.button("Sign out").clicked() {
-                        actions.push(Action::SignOut);
-                    }
-                });
-                let current = if premium {
-                    self.settings.quality()
-                } else {
-                    Quality::K128
-                };
-                ui.add_enabled_ui(premium, |ui| {
-                    egui::ComboBox::from_id_salt("quality")
-                        .selected_text(quality_label(current))
-                        .width(104.0)
-                        .show_ui(ui, |ui| {
-                            for quality in QUALITIES {
-                                if ui
-                                    .selectable_label(quality == current, quality_label(quality))
-                                    .clicked()
-                                {
-                                    actions.push(Action::SetQuality(quality));
-                                }
-                            }
-                        })
-                        .response
-                        .on_disabled_hover_text("Higher qualities need iBroadcast Premium");
-                });
-            });
-        });
         if let Some(error) = &self.audio_error {
             ui.scope(|ui| {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                ui.visuals_mut().hyperlink_color = theme::WARN;
+                ui.visuals_mut().hyperlink_color = colors.warn;
                 let reconnect =
                     RichText::new("No audio output. Click to reconnect").font(regular(11.5));
                 if ui.link(reconnect).on_hover_text(error.as_str()).clicked() {
@@ -1179,26 +1117,34 @@ impl App {
             });
         }
         ui.horizontal(|ui| {
-            ui.set_min_height(24.0);
+            ui.set_min_height(28.0);
+            ui.spacing_mut().item_spacing.x = 5.0;
             self.show_ibroadcast_badge(ui, 92.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let settings = theme::icon_button(ui, Icon::More, 28.0, colors.muted, "Settings");
+                settings.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Settings")
+                });
+                if settings.clicked() {
+                    actions.push(Action::OpenSettings);
+                }
                 if self.loading.is_some() {
                     ui.label(
                         RichText::new("Updating")
                             .font(regular(11.5))
-                            .color(theme::MUTED),
+                            .color(colors.muted),
                     );
-                    ui.add(egui::Spinner::new().size(12.0).color(theme::ACCENT_TEXT));
+                    ui.add(egui::Spinner::new().size(12.0).color(colors.accent_text));
                 } else if self.catalog.is_some() {
                     let (plan, text, fill, border) = if premium {
                         (
                             "Premium",
-                            theme::ACCENT_TEXT,
-                            theme::ACCENT.gamma_multiply(0.18),
-                            theme::ACCENT_TEXT.gamma_multiply(0.45),
+                            colors.accent_text,
+                            colors.accent.gamma_multiply(0.18),
+                            colors.accent_text.gamma_multiply(0.45),
                         )
                     } else {
-                        ("Free", theme::MUTED, theme::SURFACE, theme::LINE)
+                        ("Free", colors.muted, colors.surface, colors.line)
                     };
                     egui::Frame::new()
                         .fill(fill)
@@ -1266,11 +1212,12 @@ impl App {
     }
 
     fn browse_page(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         let browse = &mut self.browse;
         let previous = browse.kind;
         ui.horizontal(|ui| {
             if !self.history.is_empty()
-                && theme::icon_button(ui, Icon::Back, 30.0, theme::MUTED, "Back").clicked()
+                && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked()
             {
                 actions.push(Action::Back);
             }
@@ -1295,7 +1242,7 @@ impl App {
         }
         let label = browse.kind.label();
         ui.add_space(10.0);
-        ui.label(RichText::new(label).font(strong(34.0)).color(theme::TEXT));
+        ui.label(RichText::new(label).font(strong(34.0)).color(colors.text));
         ui.add_space(8.0);
         let singular = match browse.kind {
             BrowseKind::Genres => "genre",
@@ -1351,7 +1298,7 @@ impl App {
             .rows
             .get_or_insert_with(|| GroupSummary::order(groups, &browse.query, browse.sort));
         ui.add_space(8.0);
-        ui.label(RichText::new(count(rows.len(), singular, &plural)).color(theme::MUTED));
+        ui.label(RichText::new(count(rows.len(), singular, &plural)).color(colors.muted));
         ui.add_space(8.0);
         if rows.is_empty() {
             centered_message(ui, false, &format!("No {plural} found"), "");
@@ -1574,6 +1521,7 @@ impl App {
         group: Option<&BrowseGroup>,
         actions: &mut Vec<Action>,
     ) {
+        let colors = theme::colors(ui.ctx());
         let playing_album = self.playing_album();
         let catalog = self.catalog.as_mut().unwrap();
         let selected = group.map(|group| {
@@ -1680,12 +1628,12 @@ impl App {
                     if self.loading.is_some() {
                         ui.label(
                             RichText::new("Loading upload dates and album ratings…")
-                                .color(theme::MUTED),
+                                .color(colors.muted),
                         );
                     } else {
                         let status = ui.label(
                             RichText::new("Upload dates and album ratings need a library update")
-                                .color(theme::WARN),
+                                .color(colors.warn),
                         );
                         if let Some(error) = &self.library_error {
                             status.on_hover_text(error.to_string());
@@ -1705,7 +1653,7 @@ impl App {
                 } else {
                     "No rated albums in this view"
                 };
-                ui.label(RichText::new(message).color(theme::MUTED));
+                ui.label(RichText::new(message).color(colors.muted));
             }
         }
         ui.add_space(14.0);
@@ -1737,6 +1685,7 @@ impl App {
         back: bool,
         actions: &mut Vec<Action>,
     ) {
+        let colors = theme::colors(ui.ctx());
         let catalog = self.catalog.as_ref().unwrap();
         let browser = &mut self.artist_browsers[role as usize];
         let artist_sort = match role {
@@ -1762,7 +1711,7 @@ impl App {
                 )
                 .changed();
             if clear
-                && theme::icon_button(ui, Icon::Close, 30.0, theme::MUTED, "Clear artist search")
+                && theme::icon_button(ui, Icon::Close, 30.0, colors.muted, "Clear artist search")
                     .clicked()
             {
                 browser.query.clear();
@@ -1819,7 +1768,7 @@ impl App {
         }
         let order = browser.rows.as_deref().unwrap_or_default();
         ui.add_space(12.0);
-        ui.label(RichText::new(count(order.len(), &singular, &plural)).color(theme::MUTED));
+        ui.label(RichText::new(count(order.len(), &singular, &plural)).color(colors.muted));
         ui.add_space(8.0);
         if order.is_empty() {
             centered_message(ui, false, &format!("No {plural} found"), "");
@@ -1863,6 +1812,7 @@ impl App {
     }
 
     fn album_page(&mut self, ui: &mut Ui, id: u64, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         let now = self.now();
         let selected = self.selected;
         let catalog = self.catalog.as_ref().unwrap();
@@ -1877,7 +1827,7 @@ impl App {
             catalog.library.artwork_url(album.artwork, 300),
         );
         ui.horizontal(|ui| {
-            if back && theme::icon_button(ui, Icon::Back, 30.0, theme::MUTED, "Back").clicked() {
+            if back && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked() {
                 actions.push(Action::Back);
             }
         });
@@ -1892,21 +1842,21 @@ impl App {
                 ui.label(
                     RichText::new("ALBUM")
                         .font(strong(11.0))
-                        .color(theme::FAINT),
+                        .color(colors.faint),
                 );
                 ui.add(
                     egui::Label::new(
                         RichText::new(&album.name)
                             .font(strong(28.0))
-                            .color(theme::TEXT),
+                            .color(colors.text),
                     )
-                    .truncate(),
+                    .wrap(),
                 );
                 let artist = ui.add(
                     egui::Label::new(
                         RichText::new(&album.artist)
                             .font(strong(14.5))
-                            .color(theme::ACCENT_TEXT),
+                            .color(colors.accent_text),
                     )
                     .sense(Sense::click()),
                 );
@@ -1924,7 +1874,33 @@ impl App {
                 }
                 facts.push(count(album.tracks.len(), "song", "songs"));
                 facts.push(format_length(album.seconds));
-                ui.label(RichText::new(facts.join(" · ")).color(theme::MUTED));
+                ui.label(RichText::new(facts.join(" · ")).color(colors.muted));
+                let genres = catalog.album_genres(index);
+                if genres.len() != 0 {
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt(("album-genres", album.id))
+                        .max_height(72.0)
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                for genre in genres {
+                                    let button = egui::Button::new(
+                                        RichText::new(genre)
+                                            .font(regular(11.5))
+                                            .color(colors.accent_text),
+                                    )
+                                    .truncate()
+                                    .fill(colors.surface)
+                                    .stroke(Stroke::new(1.0, colors.line));
+                                    if ui.add(button).on_hover_text(genre).clicked() {
+                                        actions.push(Action::Go(Page::BrowseAlbums(
+                                            BrowseGroup::Genre(genre.to_owned()),
+                                        )));
+                                    }
+                                }
+                            });
+                        });
+                }
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     play_buttons(ui, &album.tracks, actions, false);
@@ -1992,6 +1968,7 @@ impl App {
     }
 
     fn artist_page(&mut self, ui: &mut Ui, role: ArtistRole, key: &str, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         let back = !self.history.is_empty();
         let playing_album = self.playing_album();
         let catalog = self.catalog.as_ref().unwrap();
@@ -2002,7 +1979,7 @@ impl App {
         let credits = artist.credits(role).unwrap();
         let texture = artist_texture(&mut self.art, catalog, artist, credits.artwork);
         ui.horizontal(|ui| {
-            if back && theme::icon_button(ui, Icon::Back, 30.0, theme::MUTED, "Back").clicked() {
+            if back && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked() {
                 actions.push(Action::Back);
             }
             let (avatar, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
@@ -2013,7 +1990,7 @@ impl App {
                 ui.label(
                     RichText::new(&artist.name)
                         .font(strong(26.0))
-                        .color(theme::TEXT),
+                        .color(colors.text),
                 );
                 ui.label(
                     RichText::new(format!(
@@ -2022,7 +1999,7 @@ impl App {
                         count(credits.albums.len(), "album", "albums"),
                         count(credits.tracks.len(), "song", "songs")
                     ))
-                    .color(theme::MUTED),
+                    .color(colors.muted),
                 );
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2234,6 +2211,7 @@ impl App {
     }
 
     fn search_page(&mut self, ui: &mut Ui, back: bool, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         let now = self.now();
         let selected = self.selected;
         let playing_album = self.playing_album();
@@ -2272,9 +2250,9 @@ impl App {
                                 }
                                 let label = format!("{} · {}", artist.name, role.singular());
                                 let chip =
-                                    egui::Button::new(RichText::new(label).color(theme::TEXT))
+                                    egui::Button::new(RichText::new(label).color(colors.text))
                                         .corner_radius(14)
-                                        .fill(theme::SURFACE);
+                                        .fill(colors.surface);
                                 if ui
                                     .add(chip)
                                     .on_hover_cursor(CursorIcon::PointingHand)
@@ -2300,13 +2278,13 @@ impl App {
                         ui.label(
                             RichText::new(format!("ALBUMS · {}", results.albums.len()))
                                 .font(strong(11.0))
-                                .color(theme::FAINT),
+                                .color(colors.faint),
                         );
                         if results.albums.len() > columns * 2 {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 let label = if show_all { "Show less" } else { "Show all" };
                                 if ui
-                                    .link(RichText::new(label).color(theme::ACCENT_TEXT))
+                                    .link(RichText::new(label).color(colors.accent_text))
                                     .clicked()
                                 {
                                     show_all = !show_all;
@@ -2347,7 +2325,7 @@ impl App {
                     } else {
                         format!("SONGS · {}", results.tracks.len())
                     };
-                    ui.label(RichText::new(label).font(strong(11.0)).color(theme::FAINT));
+                    ui.label(RichText::new(label).font(strong(11.0)).color(colors.faint));
                     ui.add_space(4.0);
                     let style = ListStyle {
                         number: Number::Index,
@@ -2391,6 +2369,7 @@ impl App {
     // ---- now playing ------------------------------------------------------
 
     pub(super) fn now_playing(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let colors = theme::colors(ui.ctx());
         let snapshot = self.player.output.snapshot();
         let entry = self.queue.current_entry().cloned();
         let full = ui.max_rect();
@@ -2423,7 +2402,7 @@ impl App {
                     pos2(x, cover.top() + 6.0),
                     &track.title,
                     strong(14.0),
-                    theme::TEXT,
+                    colors.text,
                     width,
                 );
                 let title_click = ui.interact(title, Id::unique("np-title"), Sense::click());
@@ -2431,7 +2410,7 @@ impl App {
                     ui.painter().hline(
                         title.x_range(),
                         title.bottom(),
-                        Stroke::new(1.0, theme::TEXT),
+                        Stroke::new(1.0, colors.text),
                     );
                 }
                 if title_click
@@ -2442,12 +2421,12 @@ impl App {
                     actions.push(Action::Go(Page::Album(album.id)));
                 }
                 let (line, color) = match (&snapshot.phase, &snapshot.note) {
-                    (Phase::Failed(error), _) => (error.to_string(), theme::ERROR),
-                    (_, Some(note)) => (note.clone(), theme::WARN),
-                    (Phase::Buffering, _) => ("Buffering…".to_owned(), theme::MUTED),
+                    (Phase::Failed(error), _) => (error.to_string(), colors.error),
+                    (_, Some(note)) => (note.clone(), colors.warn),
+                    (Phase::Buffering, _) => ("Buffering…".to_owned(), colors.muted),
                     _ => (
                         catalog::artist_label(&track.artist).to_owned(),
-                        theme::MUTED,
+                        colors.muted,
                     ),
                 };
                 let sub = clipped(
@@ -2458,13 +2437,13 @@ impl App {
                     color,
                     width,
                 );
-                if color == theme::MUTED && !matches!(snapshot.phase, Phase::Buffering) {
+                if color == colors.muted && !matches!(snapshot.phase, Phase::Buffering) {
                     let artist_click = ui.interact(sub, Id::unique("np-artist"), Sense::click());
                     if artist_click.hovered() {
                         ui.painter().hline(
                             sub.x_range(),
                             sub.bottom(),
-                            Stroke::new(1.0, theme::MUTED),
+                            Stroke::new(1.0, colors.muted),
                         );
                     }
                     if artist_click
@@ -2482,21 +2461,21 @@ impl App {
                         pos2(x, cover.top() + 44.0),
                         &track.album,
                         regular(12.0),
-                        theme::FAINT,
+                        colors.faint,
                         width,
                     );
                 }
             }
             None => {
                 ui.painter()
-                    .rect_filled(cover, CornerRadius::same(6), theme::SURFACE);
-                paint_icon(ui.painter(), cover.shrink(18.0), Icon::Note, theme::FAINT);
+                    .rect_filled(cover, CornerRadius::same(6), colors.surface);
+                paint_icon(ui.painter(), cover.shrink(18.0), Icon::Note, colors.faint);
                 ui.painter().text(
                     pos2(cover.right() + 12.0, cover.center().y),
                     Align2::LEFT_CENTER,
                     "Nothing playing",
                     regular(13.0),
-                    theme::FAINT,
+                    colors.faint,
                 );
             }
         }
@@ -2525,9 +2504,9 @@ impl App {
                 .inner
         };
         let shuffle_color = if self.settings.shuffle {
-            theme::ACCENT_TEXT
+            colors.accent_text
         } else {
-            theme::MUTED
+            colors.muted
         };
         if button(
             ui,
@@ -2545,7 +2524,7 @@ impl App {
             cx - 54.0,
             36.0,
             Icon::Previous,
-            theme::TEXT,
+            colors.text,
             "Previous",
             has_track,
         ) {
@@ -2556,11 +2535,11 @@ impl App {
             let response = ui.interact(rect, Id::unique("np-play"), Sense::click());
             let enabled = has_track || !self.queue.is_empty();
             let fill = if !enabled {
-                theme::SURFACE_HI
+                colors.surface_hi
             } else if response.hovered() {
-                Color32::WHITE
+                colors.play.lerp_to_gamma(colors.bg, 0.22)
             } else {
-                theme::CREAM
+                colors.play
             };
             ui.painter().circle_filled(rect.center(), 20.0, fill);
             let icon = if playing { Icon::Pause } else { Icon::Play };
@@ -2569,7 +2548,7 @@ impl App {
                 ui.painter(),
                 Rect::from_center_size(rect.center() + vec2(nudge, 0.0), Vec2::splat(18.0)),
                 icon,
-                theme::BAR,
+                theme::control_ink(colors.bar, fill),
             );
             if enabled && response.on_hover_cursor(CursorIcon::PointingHand).clicked() {
                 actions.push(Action::TogglePlay);
@@ -2581,7 +2560,7 @@ impl App {
                     .collect();
                 ui.painter().add(egui::Shape::line(
                     points,
-                    Stroke::new(2.0, theme::ACCENT_TEXT),
+                    Stroke::new(2.0, colors.accent_text),
                 ));
             }
         }
@@ -2590,16 +2569,16 @@ impl App {
             cx + 54.0,
             36.0,
             Icon::Next,
-            theme::TEXT,
+            colors.text,
             "Next",
             has_track,
         ) {
             actions.push(Action::Next);
         }
         let (repeat_icon, repeat_color, repeat_tip) = match self.settings.repeat {
-            Repeat::Off => (Icon::Repeat, theme::MUTED, "Repeat"),
-            Repeat::All => (Icon::Repeat, theme::ACCENT_TEXT, "Repeat all"),
-            Repeat::One => (Icon::RepeatOne, theme::ACCENT_TEXT, "Repeat one"),
+            Repeat::Off => (Icon::Repeat, colors.muted, "Repeat"),
+            Repeat::All => (Icon::Repeat, colors.accent_text, "Repeat all"),
+            Repeat::One => (Icon::RepeatOne, colors.accent_text, "Repeat one"),
         };
         if button(
             ui,
@@ -2618,7 +2597,7 @@ impl App {
         ] {
             if on {
                 ui.painter()
-                    .circle_filled(pos2(x, cy + 15.0), 1.8, theme::ACCENT_TEXT);
+                    .circle_filled(pos2(x, cy + 15.0), 1.8, colors.accent_text);
             }
         }
 
@@ -2648,7 +2627,7 @@ impl App {
                 String::new()
             },
             regular(11.5),
-            theme::MUTED,
+            colors.muted,
         );
         ui.painter().text(
             pos2(bar.right() + 10.0, bar_y),
@@ -2659,7 +2638,7 @@ impl App {
                 _ => String::new(),
             },
             regular(11.5),
-            theme::MUTED,
+            colors.muted,
         );
         if let (Some(fraction), Some(duration)) = (release, duration) {
             actions.push(Action::Seek(f64::from(fraction) * duration));
@@ -2694,7 +2673,7 @@ impl App {
             &mut child,
             level,
             30.0,
-            theme::MUTED,
+            colors.muted,
             if self.settings.muted {
                 "Unmute"
             } else {
@@ -2714,9 +2693,9 @@ impl App {
             Icon::Queue,
             30.0,
             if on_queue {
-                theme::ACCENT_TEXT
+                colors.accent_text
             } else {
-                theme::MUTED
+                colors.muted
             },
             "Queue",
         )
@@ -2740,7 +2719,7 @@ impl App {
         if has_track && !route.is_empty() {
             let galley = ui
                 .painter()
-                .layout_no_wrap(route.clone(), regular(11.0), theme::MUTED);
+                .layout_no_wrap(route.clone(), regular(11.0), colors.muted);
             let badge = Rect::from_min_size(
                 pos2(queue_rect.left() - 12.0 - galley.size().x - 14.0, vy - 10.0),
                 vec2(galley.size().x + 14.0, 20.0),
@@ -2768,13 +2747,13 @@ impl App {
                 ui.painter().rect_stroke(
                     badge,
                     CornerRadius::same(10),
-                    Stroke::new(1.0, theme::LINE),
+                    Stroke::new(1.0, colors.line),
                     egui::StrokeKind::Inside,
                 );
                 ui.painter().galley(
                     badge.min + vec2(7.0, 10.0 - galley.size().y / 2.0),
                     galley,
-                    theme::MUTED,
+                    colors.muted,
                 );
             }
         }
@@ -2789,6 +2768,7 @@ fn slider(
     fraction: f32,
     enabled: bool,
 ) -> (f32, Option<f32>, bool) {
+    let colors = theme::colors(ui.ctx());
     let hit = bar.expand2(vec2(6.0, 9.0));
     let sense = if enabled {
         Sense::click_and_drag()
@@ -2810,7 +2790,7 @@ fn slider(
     }
     let active = enabled && (response.hovered() || response.dragged());
     let painter = ui.painter();
-    painter.rect_filled(bar, CornerRadius::same(2), theme::LINE);
+    painter.rect_filled(bar, CornerRadius::same(2), colors.line);
     let filled = Rect::from_min_max(
         bar.min,
         pos2(bar.left() + bar.width() * shown, bar.bottom()),
@@ -2819,13 +2799,13 @@ fn slider(
         filled,
         CornerRadius::same(2),
         if active {
-            theme::ACCENT_TEXT
+            colors.accent_text
         } else {
-            theme::TEXT.gamma_multiply(0.85)
+            colors.text.gamma_multiply(0.85)
         },
     );
     if active {
-        painter.circle_filled(pos2(filled.right(), bar.center().y), 6.0, theme::CREAM);
+        painter.circle_filled(pos2(filled.right(), bar.center().y), 6.0, colors.play);
     }
     let dragging = enabled && response.dragged();
     if enabled {
@@ -2839,10 +2819,11 @@ fn play_buttons_reversed(ui: &mut Ui, tracks: &[usize], actions: &mut Vec<Action
 }
 
 fn section_label(ui: &mut Ui, text: &str) {
+    let colors = theme::colors(ui.ctx());
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        ui.label(RichText::new(text).font(strong(10.5)).color(theme::FAINT));
+        ui.label(RichText::new(text).font(strong(10.5)).color(colors.faint));
     });
     ui.add_space(2.0);
 }
@@ -2854,19 +2835,20 @@ fn nav_item(
     count: Option<usize>,
     selected: bool,
 ) -> egui::Response {
+    let colors = theme::colors(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let fill = if selected {
-            theme::SURFACE_HI
+            colors.surface_hi
         } else if response.hovered() {
-            theme::SURFACE
+            colors.surface
         } else {
             Color32::TRANSPARENT
         };
         painter.rect_filled(rect, CornerRadius::same(7), fill);
         let mut x = rect.left() + 10.0;
-        let color = if selected { theme::TEXT } else { theme::MUTED };
+        let color = if selected { colors.text } else { colors.muted };
         if let Some(icon) = icon {
             let r = Rect::from_center_size(pos2(x + 8.0, rect.center().y), Vec2::splat(16.0));
             paint_icon(
@@ -2874,9 +2856,9 @@ fn nav_item(
                 r,
                 icon,
                 if selected {
-                    theme::ACCENT_TEXT
+                    colors.accent_text
                 } else {
-                    theme::MUTED
+                    colors.muted
                 },
             );
             x += 26.0;
@@ -2894,7 +2876,7 @@ fn nav_item(
             } else {
                 regular(13.5)
             },
-            if selected { theme::TEXT } else { color },
+            if selected { colors.text } else { color },
             rect.right() - x - count_w - 8.0,
         );
         if let Some(text) = count_text {
@@ -2903,7 +2885,7 @@ fn nav_item(
                 Align2::RIGHT_CENTER,
                 text,
                 regular(11.5),
-                theme::FAINT,
+                colors.faint,
             );
         }
     }
@@ -2939,6 +2921,7 @@ fn artist_card(
     role: ArtistRole,
     texture: Option<(egui::TextureId, Rect)>,
 ) -> bool {
+    let colors = theme::colors(ui.ctx());
     let id = ui.make_persistent_id(("artist-card", &artist.key));
     let response = ui.interact(rect, id, Sense::click());
     let credits = artist.credits(role).unwrap();
@@ -2961,16 +2944,16 @@ fn artist_card(
         rect,
         CornerRadius::same(10),
         if active {
-            theme::SURFACE_HI
+            colors.surface_hi
         } else {
-            theme::SURFACE
+            colors.surface
         },
         Stroke::new(
             1.0,
             if active {
-                theme::ACCENT_TEXT
+                colors.accent_text
             } else {
-                theme::MUTED.gamma_multiply(0.35)
+                colors.muted.gamma_multiply(0.35)
             },
         ),
         egui::StrokeKind::Inside,
@@ -2980,20 +2963,20 @@ fn artist_card(
     let image = Rect::from_min_size(rect.min + vec2(pad, pad), Vec2::splat(width));
     artist_picture(painter, image, texture, &artist.name, 8);
     let mut title =
-        egui::text::LayoutJob::simple_singleline(artist.name.clone(), strong(15.0), theme::TEXT);
+        egui::text::LayoutJob::simple_singleline(artist.name.clone(), strong(15.0), colors.text);
     title.wrap = egui::text::TextWrapping::truncate_at_width(width);
     let name = painter.layout_job(title);
     painter.galley(
         pos2(rect.center().x - name.size().x / 2.0, image.bottom() + 13.0),
         name,
-        theme::TEXT,
+        colors.text,
     );
     painter.text(
         pos2(rect.center().x, image.bottom() + 36.0),
         Align2::CENTER_TOP,
         subtitle,
         regular(12.5),
-        theme::MUTED,
+        colors.muted,
     );
     response
         .on_hover_text(format!("{} · {albums} · {songs}", artist.name))
@@ -3032,7 +3015,7 @@ fn artist_picture(
                 Align2::CENTER_CENTER,
                 initial,
                 strong((rect.width() * 0.4).min(54.0)),
-                theme::CREAM,
+                theme::COVER_INK,
             );
         }
     }

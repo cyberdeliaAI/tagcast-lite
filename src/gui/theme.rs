@@ -5,21 +5,115 @@ use eframe::egui::{
     Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
 
-pub const BG: Color32 = Color32::from_rgb(0x10, 0x14, 0x1e);
-pub const SIDEBAR: Color32 = Color32::from_rgb(0x0b, 0x0e, 0x16);
-pub const BAR: Color32 = Color32::from_rgb(0x15, 0x1a, 0x27);
-pub const SURFACE: Color32 = Color32::from_rgb(0x1a, 0x20, 0x2f);
-pub const SURFACE_HI: Color32 = Color32::from_rgb(0x25, 0x2d, 0x44);
-pub const LINE: Color32 = Color32::from_rgb(0x23, 0x2a, 0x3b);
-pub const TEXT: Color32 = Color32::from_rgb(0xe9, 0xec, 0xf5);
-pub const MUTED: Color32 = Color32::from_rgb(0x95, 0x9d, 0xb2);
-pub const FAINT: Color32 = Color32::from_rgb(0x60, 0x68, 0x7d);
-pub const ACCENT: Color32 = Color32::from_rgb(0x52, 0x63, 0xe8);
-pub const ACCENT_HI: Color32 = Color32::from_rgb(0x66, 0x76, 0xf2);
-pub const ACCENT_TEXT: Color32 = Color32::from_rgb(0x9d, 0xa8, 0xff);
-pub const CREAM: Color32 = Color32::from_rgb(0xff, 0xf7, 0xde);
-pub const WARN: Color32 = Color32::from_rgb(0xf0, 0xb4, 0x5a);
-pub const ERROR: Color32 = Color32::from_rgb(0xf2, 0x7c, 0x7c);
+use serde::{Deserialize, Serialize};
+
+pub const COVER_INK: Color32 = Color32::from_rgb(255, 247, 222);
+const COLORS_ID: &str = "tagcast-palette";
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+pub struct Swatches {
+    pub bg: [u8; 3],
+    pub sidebar: [u8; 3],
+    pub bar: [u8; 3],
+    pub surface: [u8; 3],
+    pub surface_hi: [u8; 3],
+    pub line: [u8; 3],
+    pub text: [u8; 3],
+    pub muted: [u8; 3],
+    pub faint: [u8; 3],
+    pub accent: [u8; 3],
+    pub accent_hi: [u8; 3],
+    pub accent_text: [u8; 3],
+    pub play: [u8; 3],
+    pub on_accent: [u8; 3],
+}
+
+#[derive(Clone, Copy)]
+pub struct Colors {
+    pub bg: Color32,
+    pub sidebar: Color32,
+    pub bar: Color32,
+    pub surface: Color32,
+    pub surface_hi: Color32,
+    pub line: Color32,
+    pub text: Color32,
+    pub muted: Color32,
+    pub faint: Color32,
+    pub accent: Color32,
+    pub accent_hi: Color32,
+    pub accent_text: Color32,
+    pub play: Color32,
+    pub on_accent: Color32,
+    pub warn: Color32,
+    pub error: Color32,
+}
+
+impl Colors {
+    pub fn new(swatches: Swatches, dark: bool) -> Self {
+        let rgb = |[r, g, b]: [u8; 3]| Color32::from_rgb(r, g, b);
+        Self {
+            bg: rgb(swatches.bg),
+            sidebar: rgb(swatches.sidebar),
+            bar: rgb(swatches.bar),
+            surface: rgb(swatches.surface),
+            surface_hi: rgb(swatches.surface_hi),
+            line: rgb(swatches.line),
+            text: rgb(swatches.text),
+            muted: rgb(swatches.muted),
+            faint: rgb(swatches.faint),
+            accent: rgb(swatches.accent),
+            accent_hi: rgb(swatches.accent_hi),
+            accent_text: rgb(swatches.accent_text),
+            play: rgb(swatches.play),
+            on_accent: rgb(swatches.on_accent),
+            warn: if dark {
+                Color32::from_rgb(240, 180, 90)
+            } else {
+                Color32::from_rgb(130, 73, 16)
+            },
+            error: if dark {
+                Color32::from_rgb(242, 124, 124)
+            } else {
+                Color32::from_rgb(163, 42, 53)
+            },
+        }
+    }
+}
+
+pub fn colors(ctx: &egui::Context) -> Colors {
+    let dark = ctx.theme() == egui::Theme::Dark;
+    ctx.data(|data| data.get_temp::<[Colors; 2]>(egui::Id::unique(COLORS_ID)))
+        .map(|colors| colors[usize::from(dark)])
+        .unwrap_or_else(|| super::appearance::presets()[0].colors(dark))
+}
+
+fn luminance(color: Color32) -> f32 {
+    let [r, g, b, _] = color.to_srgba_unmultiplied();
+    let linear = |channel: u8| {
+        let srgb = channel as f32 / 255.0;
+        if srgb <= 0.04045 {
+            srgb / 12.92
+        } else {
+            ((srgb + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+pub fn control_ink(preferred: Color32, background: Color32) -> Color32 {
+    if contrast(preferred, background) >= 3.0 {
+        preferred
+    } else if luminance(background) >= 0.18 {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
+}
 
 pub fn regular(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
@@ -72,50 +166,58 @@ pub fn install(ctx: &egui::Context) {
         style.spacing.scroll = egui::style::ScrollStyle::floating();
         style.spacing.scroll.bar_width = 8.0;
         style.interaction.selectable_labels = false;
+    });
+}
 
+pub fn apply(ctx: &egui::Context, light: Colors, dark: Colors) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(COLORS_ID), [light, dark]));
+    for (mode, colors) in [(egui::Theme::Light, light), (egui::Theme::Dark, dark)] {
+        let dark = mode == egui::Theme::Dark;
+        let mut style = (*ctx.style_of(mode)).clone();
         let v = &mut style.visuals;
-        v.dark_mode = true;
-        v.panel_fill = BG;
-        v.window_fill = SURFACE;
-        v.window_stroke = Stroke::new(1.0, LINE);
+        v.dark_mode = dark;
+        v.panel_fill = colors.bg;
+        v.window_fill = colors.surface;
+        v.window_stroke = Stroke::new(1.0, colors.line);
         v.window_corner_radius = CornerRadius::same(10);
         v.menu_corner_radius = CornerRadius::same(8);
-        v.extreme_bg_color = SURFACE;
-        v.faint_bg_color = SURFACE;
-        v.text_edit_bg_color = Some(SURFACE);
-        v.hyperlink_color = ACCENT_TEXT;
-        v.selection.bg_fill = ACCENT;
-        v.selection.stroke = Stroke::new(1.0, CREAM);
-        v.warn_fg_color = WARN;
-        v.error_fg_color = ERROR;
+        v.extreme_bg_color = colors.surface;
+        v.faint_bg_color = colors.surface;
+        v.text_edit_bg_color = Some(colors.surface);
+        v.hyperlink_color = colors.accent_text;
+        v.selection.bg_fill = colors.accent;
+        v.selection.stroke = Stroke::new(1.0, colors.on_accent);
+        v.warn_fg_color = colors.warn;
+        v.error_fg_color = colors.error;
         v.override_text_color = None;
         v.slider_trailing_fill = true;
         let radius = CornerRadius::same(6);
         let w = &mut v.widgets;
-        w.noninteractive.fg_stroke = Stroke::new(1.0, TEXT);
-        w.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
-        w.noninteractive.bg_fill = BG;
-        w.inactive.bg_fill = SURFACE;
-        w.inactive.weak_bg_fill = SURFACE;
-        w.inactive.fg_stroke = Stroke::new(1.0, TEXT);
+        w.noninteractive.fg_stroke = Stroke::new(1.0, colors.text);
+        w.noninteractive.bg_stroke = Stroke::new(1.0, colors.line);
+        w.noninteractive.bg_fill = colors.bg;
+        w.inactive.bg_fill = colors.surface;
+        w.inactive.weak_bg_fill = colors.surface;
+        w.inactive.fg_stroke = Stroke::new(1.0, colors.text);
         w.inactive.bg_stroke = Stroke::NONE;
         w.inactive.corner_radius = radius;
-        w.hovered.bg_fill = SURFACE_HI;
-        w.hovered.weak_bg_fill = SURFACE_HI;
-        w.hovered.fg_stroke = Stroke::new(1.0, TEXT);
+        w.hovered.bg_fill = colors.surface_hi;
+        w.hovered.weak_bg_fill = colors.surface_hi;
+        w.hovered.fg_stroke = Stroke::new(1.0, colors.text);
         w.hovered.bg_stroke = Stroke::NONE;
         w.hovered.corner_radius = radius;
         w.hovered.expansion = 0.0;
-        w.active.bg_fill = ACCENT;
-        w.active.weak_bg_fill = ACCENT;
-        w.active.fg_stroke = Stroke::new(1.0, CREAM);
+        w.active.bg_fill = colors.accent;
+        w.active.weak_bg_fill = colors.accent;
+        w.active.fg_stroke = Stroke::new(1.0, colors.on_accent);
         w.active.bg_stroke = Stroke::NONE;
         w.active.corner_radius = radius;
         w.active.expansion = 0.0;
-        w.open.bg_fill = SURFACE_HI;
-        w.open.weak_bg_fill = SURFACE_HI;
+        w.open.bg_fill = colors.surface_hi;
+        w.open.weak_bg_fill = colors.surface_hi;
         w.open.corner_radius = radius;
-    });
+        ctx.set_style_of(mode, style);
+    }
 }
 
 pub fn panel(fill: Color32, margin: impl Into<Margin>) -> egui::Frame {
@@ -334,18 +436,22 @@ fn arc(painter: &egui::Painter, center: Pos2, radius: f32, from: f32, to: f32, s
 
 /// A round, borderless icon button.
 pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str) -> Response {
+    let colors = colors(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     if ui.is_rect_visible(rect) {
         let color = if !ui.is_enabled() {
-            FAINT
-        } else if response.hovered() && color == MUTED {
-            TEXT
+            colors.faint
+        } else if response.hovered() && color == colors.muted {
+            colors.text
         } else {
             color
         };
         if response.hovered() && ui.is_enabled() {
-            ui.painter()
-                .circle_filled(rect.center(), size * 0.5, SURFACE_HI.gamma_multiply(0.8));
+            ui.painter().circle_filled(
+                rect.center(),
+                size * 0.5,
+                colors.surface_hi.gamma_multiply(0.8),
+            );
         }
         paint_icon(ui.painter(), rect.shrink(size * 0.22), icon, color);
     }
@@ -358,20 +464,27 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str
 
 /// A pill-shaped button with an optional icon.
 pub fn pill(ui: &mut Ui, icon: Option<Icon>, text: &str, primary: bool) -> Response {
+    let colors = colors(ui.ctx());
     let font = strong(13.0);
-    let galley =
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), font, if primary { CREAM } else { TEXT });
+    let galley = ui.painter().layout_no_wrap(
+        text.to_owned(),
+        font,
+        if primary {
+            colors.on_accent
+        } else {
+            colors.text
+        },
+    );
     let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
     let size = vec2(galley.size().x + icon_w + 30.0, 34.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered() && ui.is_enabled();
         let fill = match (primary, hovered) {
-            (true, true) => ACCENT_HI,
-            (true, false) => ACCENT,
-            (false, true) => SURFACE_HI,
-            (false, false) => SURFACE,
+            (true, true) => colors.accent_hi,
+            (true, false) => colors.accent,
+            (false, true) => colors.surface_hi,
+            (false, false) => colors.surface,
         };
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(17), fill);
@@ -379,18 +492,27 @@ pub fn pill(ui: &mut Ui, icon: Option<Icon>, text: &str, primary: bool) -> Respo
             painter.rect_stroke(
                 rect,
                 CornerRadius::same(17),
-                Stroke::new(1.0, LINE),
+                Stroke::new(1.0, colors.line),
                 StrokeKind::Inside,
             );
         }
         let mut x = rect.left() + 15.0;
         if let Some(icon) = icon {
             let r = Rect::from_center_size(pos2(x + 7.0, rect.center().y), Vec2::splat(15.0));
-            paint_icon(painter, r, icon, if primary { CREAM } else { TEXT });
+            paint_icon(
+                painter,
+                r,
+                icon,
+                if primary {
+                    colors.on_accent
+                } else {
+                    colors.text
+                },
+            );
             x += icon_w;
         }
         let y = rect.center().y - galley.size().y / 2.0;
-        painter.galley(pos2(x, y), galley, TEXT);
+        painter.galley(pos2(x, y), galley, colors.text);
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
