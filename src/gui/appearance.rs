@@ -7,7 +7,7 @@ use eframe::egui::{
     StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 use serde::{Deserialize, Serialize};
-use tagcast_player::{APP_NAME, transport::Quality};
+use tagcast_player::{APP_NAME, Failure, transport::Quality};
 
 use super::{
     Action, QUALITIES,
@@ -182,6 +182,7 @@ pub struct SettingsState<'a> {
     pub gapless: bool,
     pub signed_in: bool,
     pub loading: bool,
+    pub library_error: Option<&'a Failure>,
     /// Songs, albums and playlists, once the library has loaded.
     pub library: Option<[usize; 3]>,
     pub output: Option<&'a str>,
@@ -550,16 +551,21 @@ impl SettingsWindow {
 
         caption(ui, "LIBRARY");
         card(ui, |ui| {
-            let detail = match state.library {
-                Some([songs, albums, playlists]) => format!(
-                    "{} · {} · {}",
-                    count(songs, "song", "songs"),
-                    count(albums, "album", "albums"),
-                    count(playlists, "playlist", "playlists"),
+            let (detail, color) = match (state.library, state.loading, state.library_error) {
+                (Some([songs, albums, playlists]), _, _) => (
+                    format!(
+                        "{} · {} · {}",
+                        count(songs, "song", "songs"),
+                        count(albums, "album", "albums"),
+                        count(playlists, "playlist", "playlists"),
+                    ),
+                    colors.muted,
                 ),
-                None => "Loading…".to_owned(),
+                (None, true, _) => ("Loading…".to_owned(), colors.muted),
+                (None, false, Some(error)) => (error.to_string(), colors.warn),
+                (None, false, None) => ("Library unavailable.".to_owned(), colors.muted),
             };
-            row(ui, "Your library", Some((&detail, colors.muted)), |ui| {
+            row(ui, "Your library", Some((&detail, color)), |ui| {
                 let label = if state.loading {
                     "Updating…"
                 } else {
@@ -1168,7 +1174,7 @@ mod tests {
         ctx: egui::Context,
         window: SettingsWindow,
         preferences: Preferences,
-        signed_in: bool,
+        state: SettingsState<'static>,
     }
 
     impl Dialog {
@@ -1184,7 +1190,18 @@ mod tests {
                 ctx,
                 window,
                 preferences,
-                signed_in,
+                state: SettingsState {
+                    quality: Quality::Original,
+                    premium: true,
+                    gapless: false,
+                    signed_in,
+                    loading: false,
+                    library_error: None,
+                    library: signed_in.then_some([1200, 90, 4]),
+                    output: Some("Speakers"),
+                    audio_error: None,
+                    logo: None,
+                },
             }
         }
 
@@ -1195,20 +1212,9 @@ mod tests {
                 events,
                 ..Default::default()
             };
-            let state = SettingsState {
-                quality: Quality::Original,
-                premium: true,
-                gapless: false,
-                signed_in: self.signed_in,
-                loading: false,
-                library: self.signed_in.then_some([1200, 90, 4]),
-                output: Some("Speakers"),
-                audio_error: None,
-                logo: None,
-            };
             let mut actions = Vec::new();
             let mut output = self.ctx.run_pass(input, |ctx| {
-                let state = SettingsState { ..state };
+                let state = SettingsState { ..self.state };
                 self.window
                     .show(ctx, &mut self.preferences, state, &mut actions);
             });
@@ -1271,6 +1277,57 @@ mod tests {
     }
 
     #[test]
+    fn account_shows_the_library_error_and_allows_a_retry() {
+        let mut dialog = Dialog::new(Section::Account, true);
+        dialog.state.library = None;
+        dialog.state.loading = true;
+        assert!(dialog.labels().iter().any(|label| label == "Loading…"));
+
+        dialog.state.loading = false;
+        dialog.state.library_error = Some(&Failure::Network);
+        let labels = dialog.labels();
+        assert!(!labels.iter().any(|label| label == "Loading…"));
+        assert!(labels.contains(&Failure::Network.to_string()));
+        assert!(matches!(dialog.click("Reload")[..], [Action::Reload]));
+
+        dialog.state.loading = true;
+        let labels = dialog.labels();
+        assert!(labels.iter().any(|label| label == "Loading…"));
+        assert!(!labels.contains(&Failure::Network.to_string()));
+    }
+
+    #[test]
+    fn only_the_focused_confirmation_button_has_a_focus_ring() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let draw = || {
+            let mut buttons = Vec::new();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                buttons.push(theme::button(ui, "Sign out", Tone::Danger));
+                buttons.push(theme::button(ui, "Cancel", Tone::Plain));
+            });
+            output.textures_delta.clear();
+            let rings: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.stroke_kind == StrokeKind::Outside => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            (buttons, rings)
+        };
+        let (buttons, rings) = draw();
+        assert!(rings.is_empty());
+        for button in buttons {
+            button.request_focus();
+            assert_eq!(draw().1, [button.rect]);
+        }
+    }
+
+    #[test]
     fn signing_out_asks_first() {
         let mut dialog = Dialog::new(Section::Account, true);
         assert!(dialog.click("Sign out…").is_empty());
@@ -1322,6 +1379,7 @@ mod tests {
             gapless: false,
             signed_in: true,
             loading: false,
+            library_error: None,
             library: None,
             output: None,
             audio_error: None,
