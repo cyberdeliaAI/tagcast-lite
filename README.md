@@ -48,6 +48,8 @@ The cask is maintained in the [Cyberdelia Homebrew tap](https://github.com/cyber
 
 ## Screenshots
 
+These screenshots show the library in v0.3.6, before the sidebar settings gear was added.
+
 ![Albums with cover art, the compact sidebar and playback controls](docs/screenshots/albums.jpg)
 
 <details>
@@ -130,15 +132,16 @@ Volume, quality, shuffle, repeat, album and artist sort, and the window size are
 
 ### Settings
 
-Click **⋯** next to your plan at the bottom of the sidebar to open Settings.
-**Playback** has streaming quality, gapless playback and audio output controls.
-**Reload library** and **Sign out** are at the bottom of the window.
+Click the gear next to your plan at the bottom of the sidebar to open Settings.
+Under **Playback** you can choose the streaming quality, turn gapless playback
+on or off, and reconnect your audio output. Open **Account** to see your plan
+and library counts, reload the library with **Reload**, or **Sign out**.
 
 Choose **Appearance** to switch between Dark, Light and System and pick a colour
 theme. The original Lite style, Tagcast's six built-in palettes, and the eleven
-themes from the Tagcast theme pack are included. **Create a copy** opens the
-theme editor. Edit and preview the Light
-and Dark colours independently, then save a custom theme. Theme settings are
+themes from the Tagcast theme pack are included. Choose **Duplicate** to make
+your own copy. Edit and preview its Light and Dark colours independently,
+then choose **Save and apply**. Theme settings are
 stored locally. See the [theme attributions](assets/themes/ATTRIBUTION.txt).
 
 ### Keyboard
@@ -150,17 +153,18 @@ stored locally. See the [theme attributions](assets/themes/ATTRIBUTION.txt).
 | ⌘← / ⌘→ | Previous or next track |
 | ⌘↑ / ⌘↓ | Volume |
 | ⌘F | Search |
+| ⌘, | Open Settings from the library |
 | Esc | Clear the search or go back |
 | ⌘R | Reload the library |
 
-On Linux, use Ctrl instead of ⌘.
+On Windows and Linux, use Ctrl instead of ⌘.
 
 ### Command line
 
 `--client-id ID` (or `IBROADCAST_CLIENT_ID`) selects a custom public OAuth
 client. `--logout` removes the player's stored sign-in and library snapshot for
-that client. **Sign out** at the bottom of Settings does the same from
-the window. The full Tagcast app uses separate credentials and settings.
+that client. In the app, choose **Settings → Account → Sign out** and confirm.
+The full Tagcast app uses separate credentials and settings.
 
 ## Playback
 

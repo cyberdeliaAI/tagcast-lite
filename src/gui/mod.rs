@@ -47,6 +47,18 @@ pub struct Options {
 
 const APP_ID: &str = "tagcast-player";
 
+/// Extra room at the top of the window. On macOS the content runs up behind
+/// the title bar, where the window buttons sit and clicks drag the window.
+const TITLE_BAR: i8 = if cfg!(target_os = "macos") { 16 } else { 0 };
+
+/// macOS names the About, Hide and Quit items of the application menu after
+/// the process, which would otherwise be the binary's file name.
+#[cfg(target_os = "macos")]
+fn name_process() {
+    use objc2_foundation::{NSProcessInfo, NSString};
+    NSProcessInfo::processInfo().setProcessName(&NSString::from_str(APP_NAME));
+}
+
 fn preferences() -> Option<PathBuf> {
     let target = data_dir()?.join("app.ron");
     let previous = [APP_ID, APP_NAME, "Tagcast Player"]
@@ -104,11 +116,18 @@ mod preferences_tests {
 }
 
 pub fn run(options: Options) -> std::result::Result<(), Box<dyn Error>> {
+    #[cfg(target_os = "macos")]
+    name_process();
+    // The three title bar settings only act on macOS: the sidebar and page
+    // run to the top edge, and the title stays out of the window.
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_NAME)
         .with_app_id(APP_ID)
         .with_inner_size([1200.0, 780.0])
-        .with_min_inner_size([820.0, 540.0]);
+        .with_min_inner_size([820.0, 540.0])
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false);
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon-256.png"))
     {
         viewport = viewport.with_icon(icon);
@@ -1121,6 +1140,9 @@ impl App {
             if input.consume_key(command, Key::F) {
                 self.search_focus = true;
             }
+            if input.consume_key(command, Key::Comma) {
+                actions.push(Action::OpenSettings);
+            }
             if input.pointer.button_pressed(egui::PointerButton::Extra1) {
                 actions.push(Action::Back);
             }
@@ -1315,6 +1337,12 @@ impl eframe::App for App {
         } else {
             self.keyboard(&ctx)
         };
+        // A full-screen window has no title bar to keep clear of.
+        let top = if ctx.input(|input| input.viewport().fullscreen == Some(true)) {
+            0
+        } else {
+            TITLE_BAR
+        };
         egui::Panel::bottom("now-playing")
             .exact_size(86.0)
             .resizable(false)
@@ -1330,7 +1358,7 @@ impl eframe::App for App {
                 Margin {
                     left: 12,
                     right: 12,
-                    top: 14,
+                    top: 14 + top,
                     bottom: 5,
                 },
             ))
@@ -1339,7 +1367,15 @@ impl eframe::App for App {
             egui::Panel::right("queue-preview")
                 .default_size(236.0)
                 .resizable(true)
-                .frame(theme::panel(colors.sidebar, Margin::symmetric(12, 14)))
+                .frame(theme::panel(
+                    colors.sidebar,
+                    Margin {
+                        left: 12,
+                        right: 12,
+                        top: 14 + top,
+                        bottom: 14,
+                    },
+                ))
                 .show(ui, |ui| self.queue_preview(ui, &mut actions));
         }
         egui::CentralPanel::default()
@@ -1348,7 +1384,7 @@ impl eframe::App for App {
                 Margin {
                     left: 26,
                     right: 18,
-                    top: 18,
+                    top: 18 + top,
                     bottom: 0,
                 },
             ))
@@ -1388,6 +1424,17 @@ impl App {
             gapless: self.settings.gapless,
             signed_in: self.source.is_some(),
             loading: self.loading.is_some(),
+            library_error: self.library_error.as_ref(),
+            library: self.catalog.as_ref().map(|catalog| {
+                [
+                    catalog.library.tracks.len(),
+                    catalog.albums.len(),
+                    catalog.playlist_count,
+                ]
+            }),
+            output: self.player.output.device_name.as_deref(),
+            audio_error: self.audio_error.as_deref(),
+            logo: self.logo.as_ref(),
         };
         self.settings_window
             .show(ctx, &mut self.appearance, state, actions);
@@ -1438,7 +1485,7 @@ impl App {
                                     ui.add(egui::Image::new(logo).fit_to_exact_size(egui::Vec2::splat(64.0)));
                                 }
                                 ui.add_space(6.0);
-                                ui.label(RichText::new(APP_NAME).font(theme::strong(22.0)).color(colors.text));
+                                ui.label(RichText::new(APP_NAME).font(theme::strong(theme::Size::HEADING)).color(colors.text));
                                 ui.label(RichText::new("An independent player for your iBroadcast library").color(colors.muted));
                                 ui.add_space(4.0);
                                 self.show_ibroadcast_badge(ui, 128.0);
@@ -1447,7 +1494,7 @@ impl App {
                                     (Some((uri, user_code)), true) => {
                                         ui.label(RichText::new("Open iBroadcast and enter this code").color(colors.muted));
                                         ui.add_space(6.0);
-                                        ui.label(RichText::new(user_code).font(theme::strong(32.0)).color(colors.play));
+                                        ui.label(RichText::new(user_code).font(theme::strong(theme::Size::DISPLAY)).color(colors.play));
                                         ui.add_space(12.0);
                                         ui.horizontal(|ui| {
                                             let width = 2.0 * 150.0 + 8.0;
