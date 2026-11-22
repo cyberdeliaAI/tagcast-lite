@@ -1424,12 +1424,12 @@ impl App {
             gapless: self.settings.gapless,
             signed_in: self.source.is_some(),
             loading: self.loading.is_some(),
+            library_error: self.library_error.as_ref(),
             library: self.catalog.as_ref().map(|catalog| {
-                let playlists = &catalog.library.playlists;
                 [
                     catalog.library.tracks.len(),
                     catalog.albums.len(),
-                    playlists.iter().filter(|list| !list.folder).count(),
+                    catalog.playlist_count,
                 ]
             }),
             output: self.player.output.device_name.as_deref(),

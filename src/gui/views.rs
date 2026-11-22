@@ -2948,6 +2948,7 @@ pub(super) fn nav_item(
                 colors.faint,
             );
         }
+        theme::focus_ring(ui, &response, rect, CornerRadius::same(7));
     }
     response.on_hover_cursor(CursorIcon::PointingHand)
 }

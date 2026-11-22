@@ -573,6 +573,18 @@ fn arc(painter: &egui::Painter, center: Pos2, radius: f32, from: f32, to: f32, s
     painter.add(Shape::line(points, stroke));
 }
 
+/// Draw outside the control so keyboard focus remains distinct from its fill and selection.
+pub(super) fn focus_ring(ui: &Ui, response: &Response, rect: Rect, radius: CornerRadius) {
+    if response.has_focus() && response.enabled() {
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            Stroke::new(2.0, colors(ui.ctx()).text),
+            StrokeKind::Outside,
+        );
+    }
+}
+
 /// A round, borderless icon button.
 pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str) -> Response {
     let colors = colors(ui.ctx());
@@ -593,6 +605,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str
             );
         }
         paint_icon(ui.painter(), rect.shrink(size * 0.22), icon, color);
+        focus_ring(ui, &response, rect, CornerRadius::same((size / 2.0) as u8));
     }
     if tip.is_empty() {
         response
@@ -711,6 +724,7 @@ pub fn button(ui: &mut Ui, text: &str, tone: Tone) -> Response {
         }
         let pos = rect.center() - galley.size() / 2.0;
         painter.galley(pos, galley, ink);
+        focus_ring(ui, &response, rect, radius);
     }
     if enabled {
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -739,6 +753,7 @@ pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
         painter.rect_filled(rect, CornerRadius::same(11), track.gamma_multiply(dim));
         let x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, t);
         painter.circle_filled(pos2(x, rect.center().y), 8.0, knob.gamma_multiply(dim));
+        focus_ring(ui, &response, rect, CornerRadius::same(11));
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -801,6 +816,7 @@ pub fn segmented<T: Copy + PartialEq>(
             font.clone(),
             if selected { colors.text } else { colors.muted },
         );
+        focus_ring(ui, &response, cell, CornerRadius::same(6));
         response.on_hover_cursor(egui::CursorIcon::PointingHand);
     }
     changed
