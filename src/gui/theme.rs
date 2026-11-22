@@ -115,6 +115,30 @@ pub fn control_ink(preferred: Color32, background: Color32) -> Color32 {
     }
 }
 
+/// The type scale. Interface text uses these sizes and no others; only
+/// drawings that scale with their box (icons, initials, the theme preview)
+/// pick their own.
+pub struct Size;
+
+impl Size {
+    /// Overlines, column headings and the smallest notes.
+    pub const MICRO: f32 = 11.0;
+    /// Secondary lines, counts and times.
+    pub const SMALL: f32 = 12.0;
+    /// Rows, navigation, buttons and running text.
+    pub const BODY: f32 = 13.5;
+    /// Names that lead a card or a block.
+    pub const LEAD: f32 = 15.0;
+    /// Section and dialog headings.
+    pub const HEADING: f32 = 20.0;
+    /// The title of a page.
+    pub const TITLE: f32 = 26.0;
+    /// One-off large figures, such as the sign-in code.
+    pub const DISPLAY: f32 = 32.0;
+    /// Inter's ascent as a share of the font size, for setting two sizes on one baseline.
+    pub const ASCENT: f32 = 0.97;
+}
+
 pub fn regular(size: f32) -> FontId {
     FontId::new(size, FontFamily::Proportional)
 }
@@ -153,11 +177,11 @@ pub fn install(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         use egui::TextStyle;
         style.text_styles = [
-            (TextStyle::Small, regular(11.5)),
-            (TextStyle::Body, regular(13.5)),
-            (TextStyle::Button, regular(13.5)),
-            (TextStyle::Heading, strong(24.0)),
-            (TextStyle::Monospace, FontId::monospace(12.5)),
+            (TextStyle::Small, regular(Size::SMALL)),
+            (TextStyle::Body, regular(Size::BODY)),
+            (TextStyle::Button, regular(Size::BODY)),
+            (TextStyle::Heading, strong(Size::HEADING)),
+            (TextStyle::Monospace, FontId::monospace(Size::SMALL)),
         ]
         .into();
         style.spacing.item_spacing = vec2(8.0, 6.0);
@@ -245,6 +269,16 @@ pub enum Icon {
     More,
     Close,
     Bars,
+    Settings,
+    Contrast,
+    Keyboard,
+    Info,
+    /// A star, filled when the thing is a favourite.
+    Star(bool),
+    Clock,
+    Grid,
+    Microphone,
+    Folder,
 }
 
 /// Draws an icon centred in `rect`. Icons are designed on a 20-point grid.
@@ -421,6 +455,111 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color3
                 painter.rect_filled(r, 1.0 * s, color);
             }
         }
+        Icon::Settings => {
+            let teeth = Stroke::new(3.2 * s, color);
+            for step in 0..8 {
+                let direction = Vec2::angled(step as f32 * std::f32::consts::FRAC_PI_4);
+                painter.line_segment([c + direction * 5.0 * s, c + direction * 9.0 * s], teeth);
+            }
+            painter.circle_stroke(c, 4.6 * s, Stroke::new(2.6 * s, color));
+        }
+        Icon::Contrast => {
+            painter.circle_stroke(c, 7.5 * s, stroke);
+            let half = (0..=12)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 12.0;
+                    c + Vec2::angled(a) * 7.5 * s
+                })
+                .collect();
+            painter.add(fill(half));
+        }
+        Icon::Keyboard => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-8.5, -5.5), p(8.5, 5.5)),
+                2.4 * s,
+                stroke,
+                StrokeKind::Middle,
+            );
+            for x in [-4.5, 0.0, 4.5] {
+                painter.circle_filled(p(x, -1.6), 1.1 * s, color);
+            }
+            painter.line_segment([p(-3.6, 2.2), p(3.6, 2.2)], stroke);
+        }
+        Icon::Info => {
+            painter.circle_stroke(c, 7.5 * s, stroke);
+            painter.circle_filled(p(0.0, -3.7), 1.2 * s, color);
+            painter.line_segment([p(0.0, -0.9), p(0.0, 4.3)], stroke);
+        }
+        Icon::Star(filled) => {
+            // Ten points, alternating between the tips and the notches.
+            let points: Vec<Pos2> = (0..10)
+                .map(|i| {
+                    let radius = if i % 2 == 0 { 8.4 } else { 3.9 };
+                    let angle = (i as f32 * 36.0 - 90.0).to_radians();
+                    p(0.0, 0.8) + Vec2::angled(angle) * radius * s
+                })
+                .collect();
+            if filled {
+                // A star is not convex, so it is filled as five tips around a pentagon.
+                for tip in (0..10).step_by(2) {
+                    painter.add(fill(vec![
+                        points[(tip + 9) % 10],
+                        points[tip],
+                        points[tip + 1],
+                    ]));
+                }
+                painter.add(fill(points.iter().copied().skip(1).step_by(2).collect()));
+            }
+            painter.add(Shape::closed_line(points, Stroke::new(1.5 * s, color)));
+        }
+        Icon::Clock => {
+            painter.circle_stroke(c, 7.5 * s, stroke);
+            painter.add(Shape::line(
+                vec![p(0.0, -4.4), p(0.0, 0.3), p(3.3, 2.3)],
+                stroke,
+            ));
+        }
+        Icon::Grid => {
+            for (x, y) in [(-4.6, -4.6), (4.6, -4.6), (-4.6, 4.6), (4.6, 4.6)] {
+                painter.rect_stroke(
+                    Rect::from_center_size(p(x, y), Vec2::splat(6.0 * s)),
+                    1.6 * s,
+                    stroke,
+                    StrokeKind::Middle,
+                );
+            }
+        }
+        Icon::Microphone => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-2.9, -8.4), p(2.9, 1.8)),
+                2.9 * s,
+                stroke,
+                StrokeKind::Middle,
+            );
+            arc(
+                painter,
+                p(0.0, 0.6),
+                5.7 * s,
+                0.0,
+                std::f32::consts::PI,
+                stroke,
+            );
+            painter.line_segment([p(0.0, 6.3), p(0.0, 8.6)], stroke);
+            painter.line_segment([p(-3.2, 8.6), p(3.2, 8.6)], stroke);
+        }
+        Icon::Folder => {
+            painter.add(Shape::closed_line(
+                vec![
+                    p(-8.0, -6.0),
+                    p(-3.0, -6.0),
+                    p(-0.8, -3.6),
+                    p(8.0, -3.6),
+                    p(8.0, 6.2),
+                    p(-8.0, 6.2),
+                ],
+                stroke,
+            ));
+        }
     }
 }
 
@@ -432,6 +571,18 @@ fn arc(painter: &egui::Painter, center: Pos2, radius: f32, from: f32, to: f32, s
         })
         .collect();
     painter.add(Shape::line(points, stroke));
+}
+
+/// Draw outside the control so keyboard focus remains distinct from its fill and selection.
+pub(super) fn focus_ring(ui: &Ui, response: &Response, rect: Rect, radius: CornerRadius) {
+    if response.has_focus() && response.enabled() {
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            Stroke::new(2.0, colors(ui.ctx()).text),
+            StrokeKind::Outside,
+        );
+    }
 }
 
 /// A round, borderless icon button.
@@ -454,6 +605,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str
             );
         }
         paint_icon(ui.painter(), rect.shrink(size * 0.22), icon, color);
+        focus_ring(ui, &response, rect, CornerRadius::same((size / 2.0) as u8));
     }
     if tip.is_empty() {
         response
@@ -465,7 +617,7 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str
 /// A pill-shaped button with an optional icon.
 pub fn pill(ui: &mut Ui, icon: Option<Icon>, text: &str, primary: bool) -> Response {
     let colors = colors(ui.ctx());
-    let font = strong(13.0);
+    let font = strong(Size::BODY);
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
         font,
@@ -517,6 +669,195 @@ pub fn pill(ui: &mut Ui, icon: Option<Icon>, text: &str, primary: bool) -> Respo
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// How a dialog button presents itself.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Plain,
+    Primary,
+    Danger,
+}
+
+/// A compact rounded button for dialogs. It keeps an outline, so it stays
+/// visible on every panel colour.
+pub fn button(ui: &mut Ui, text: &str, tone: Tone) -> Response {
+    let colors = colors(ui.ctx());
+    let enabled = ui.is_enabled();
+    let ink = match tone {
+        _ if !enabled => colors.faint,
+        Tone::Plain => colors.text,
+        Tone::Primary => colors.on_accent,
+        Tone::Danger => colors.error,
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), strong(Size::BODY), ink);
+    let size = vec2(galley.size().x + 26.0, 28.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, text));
+    if ui.is_rect_visible(rect) {
+        let hovered = enabled && response.hovered();
+        let radius = CornerRadius::same(14);
+        let painter = ui.painter();
+        if tone == Tone::Primary && enabled {
+            let fill = if hovered {
+                colors.accent_hi
+            } else {
+                colors.accent
+            };
+            painter.rect_filled(rect, radius, fill);
+        } else {
+            let danger = tone == Tone::Danger && enabled;
+            if hovered {
+                let wash = if danger {
+                    colors.error.gamma_multiply(0.16)
+                } else {
+                    colors.surface_hi
+                };
+                painter.rect_filled(rect, radius, wash);
+            }
+            let edge = if danger {
+                colors.error.gamma_multiply(0.55)
+            } else {
+                colors.line
+            };
+            painter.rect_stroke(rect, radius, Stroke::new(1.0, edge), StrokeKind::Inside);
+        }
+        let pos = rect.center() - galley.size() / 2.0;
+        painter.galley(pos, galley, ink);
+        focus_ring(ui, &response, rect, radius);
+    }
+    if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    }
+}
+
+/// An on/off switch. `label` names it for assistive technology.
+pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
+    let colors = colors(ui.ctx());
+    let (rect, mut response) = ui.allocate_exact_size(vec2(38.0, 22.0), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    let (enabled, state) = (ui.is_enabled(), *on);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Switch, enabled, state, label));
+    if ui.is_rect_visible(rect) {
+        let t = ui.ctx().animate_bool_responsive(response.id, state);
+        let off = colors.surface.lerp_to_gamma(colors.muted, 0.45);
+        let track = off.lerp_to_gamma(colors.accent, t);
+        let knob = Color32::WHITE.lerp_to_gamma(control_ink(colors.on_accent, colors.accent), t);
+        let dim = if enabled { 1.0 } else { 0.5 };
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(11), track.gamma_multiply(dim));
+        let x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, t);
+        painter.circle_filled(pos2(x, rect.center().y), 8.0, knob.gamma_multiply(dim));
+        focus_ring(ui, &response, rect, CornerRadius::same(11));
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Mutually exclusive choices drawn as one control. Returns whether the choice changed.
+pub fn segmented<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    salt: &str,
+    value: &mut T,
+    options: &[(T, &str)],
+) -> bool {
+    let colors = colors(ui.ctx());
+    let font = strong(Size::BODY);
+    let widths: Vec<f32> = options
+        .iter()
+        .map(|(_, text)| {
+            let galley = ui
+                .painter()
+                .layout_no_wrap((*text).to_owned(), font.clone(), colors.text);
+            galley.size().x + 24.0
+        })
+        .collect();
+    let size = vec2(widths.iter().sum::<f32>() + 4.0, 28.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let radius = CornerRadius::same(8);
+    ui.painter().rect_filled(rect, radius, colors.bg);
+    ui.painter().rect_stroke(
+        rect,
+        radius,
+        Stroke::new(1.0, colors.line),
+        StrokeKind::Inside,
+    );
+    let enabled = ui.is_enabled();
+    let mut changed = false;
+    let mut x = rect.left() + 2.0;
+    for ((option, text), width) in options.iter().zip(widths) {
+        let cell = Rect::from_min_size(pos2(x, rect.top() + 2.0), vec2(width, 24.0));
+        x += width;
+        let selected = *value == *option;
+        let response = ui.interact(cell, ui.scope_id().with((salt, *text)), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, *text)
+        });
+        if response.clicked() && !selected {
+            *value = *option;
+            changed = true;
+        }
+        let fill = if selected {
+            colors.surface_hi
+        } else if response.hovered() {
+            colors.surface
+        } else {
+            Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(cell, CornerRadius::same(6), fill);
+        ui.painter().text(
+            cell.center(),
+            egui::Align2::CENTER_CENTER,
+            *text,
+            font.clone(),
+            if selected { colors.text } else { colors.muted },
+        );
+        focus_ring(ui, &response, cell, CornerRadius::same(6));
+        response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    }
+    changed
+}
+
+/// A keyboard key, as shown in the shortcut list.
+pub fn key_cap(ui: &mut Ui, text: &str) {
+    let colors = colors(ui.ctx());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), regular(Size::SMALL), colors.text);
+    let size = vec2((galley.size().x + 14.0).max(26.0), 22.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let radius = CornerRadius::same(5);
+    let painter = ui.painter();
+    painter.rect_filled(rect, radius, colors.bg);
+    painter.rect_stroke(
+        rect,
+        radius,
+        Stroke::new(1.0, colors.line),
+        StrokeKind::Inside,
+    );
+    painter.galley(rect.center() - galley.size() / 2.0, galley, colors.text);
+}
+
+/// Restyles the stock egui widgets in `ui` for a `surface`-coloured container,
+/// where their default fill is the container's own colour.
+pub fn on_surface(ui: &mut Ui) {
+    let colors = colors(ui.ctx());
+    let edge = Stroke::new(1.0, colors.line);
+    let visuals = ui.visuals_mut();
+    visuals.extreme_bg_color = colors.bg;
+    visuals.text_edit_bg_color = Some(colors.bg);
+    let widgets = &mut visuals.widgets;
+    widgets.inactive.bg_fill = colors.bg;
+    widgets.inactive.weak_bg_fill = colors.bg;
+    widgets.inactive.bg_stroke = edge;
+    widgets.hovered.bg_stroke = edge;
+    widgets.open.bg_stroke = edge;
+}
+
 /// Single-line text that ends in an ellipsis when it does not fit.
 pub fn clipped(
     painter: &egui::Painter,
@@ -529,12 +870,23 @@ pub fn clipped(
     if width <= 4.0 {
         return Rect::from_min_size(pos, Vec2::ZERO);
     }
-    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
-    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
-    let galley = painter.layout_job(job);
+    let galley = line(painter, text, font, color, width);
     let rect = Rect::from_min_size(pos, galley.size());
     painter.galley(pos, galley, color);
     rect
+}
+
+/// Lays out single-line text that ends in an ellipsis when it does not fit.
+pub fn line(
+    painter: &egui::Painter,
+    text: &str,
+    font: FontId,
+    color: Color32,
+    width: f32,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+    painter.layout_job(job)
 }
 
 /// A deterministic colour for an artist's initial badge.

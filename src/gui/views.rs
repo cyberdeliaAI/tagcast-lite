@@ -17,7 +17,7 @@ use super::{
         Catalog, DiscSection, GroupSummary, SongSort, count, format_length, format_time,
     },
     quality_label,
-    theme::{self, Icon, clipped, paint_icon, regular, strong},
+    theme::{self, Icon, Size, clipped, paint_icon, regular, strong},
 };
 
 const ROW: f32 = 34.0;
@@ -144,7 +144,8 @@ fn header_row(ui: &mut Ui, style: ListStyle, sort: Option<(SongSort, bool)>) -> 
         } else {
             pos2(cell.left(), cell.center().y)
         };
-        ui.painter().text(pos, align, text, strong(11.0), color);
+        ui.painter()
+            .text(pos, align, text, strong(Size::MICRO), color);
         if let Some((key, response)) = response
             && response.on_hover_cursor(CursorIcon::PointingHand).clicked()
         {
@@ -196,7 +197,7 @@ fn track_row(
     };
     painter.rect_filled(rect, CornerRadius::same(6), fill);
     let y = rect.center().y;
-    let font = regular(13.5);
+    let font = regular(Size::BODY);
     let (text, muted) = if state.dim {
         (colors.muted, colors.faint)
     } else {
@@ -237,7 +238,7 @@ fn track_row(
             pos2(number_rect.left() + 2.0, y),
             Align2::LEFT_CENTER,
             label,
-            regular(12.5),
+            regular(Size::SMALL),
             if state.current {
                 colors.accent_text
             } else {
@@ -256,7 +257,7 @@ fn track_row(
         pos2(cols.title.min, y - 8.5),
         &track.title,
         if state.current {
-            strong(13.5)
+            strong(Size::BODY)
         } else {
             font.clone()
         },
@@ -419,7 +420,7 @@ fn disc_heading(ui: &mut Ui, number: u64) {
         pos2(rect.left() + 8.0, rect.center().y + 1.0),
         Align2::LEFT_CENTER,
         label,
-        strong(12.5),
+        strong(Size::SMALL),
         colors.muted,
     );
     ui.painter()
@@ -565,7 +566,7 @@ fn album_tile(
         painter,
         pos2(rect.left(), y),
         &album.name,
-        strong(13.0),
+        strong(Size::BODY),
         if current {
             colors.accent_text
         } else {
@@ -582,7 +583,7 @@ fn album_tile(
         painter,
         pos2(rect.left(), y + 19.0),
         &sub,
-        regular(12.0),
+        regular(Size::SMALL),
         colors.muted,
         rect.width(),
     );
@@ -697,14 +698,14 @@ fn group_card(ui: &mut Ui, rect: Rect, group: &GroupSummary) -> bool {
     );
     let right = rect.right() - 13.0;
     let center = rect.center().y;
-    let albums = painter.layout_no_wrap(albums, regular(12.0), colors.muted);
-    let tracks = painter.layout_no_wrap(tracks, regular(11.5), colors.muted);
+    let albums = painter.layout_no_wrap(albums, regular(Size::SMALL), colors.muted);
+    let tracks = painter.layout_no_wrap(tracks, regular(Size::SMALL), colors.muted);
     let label_width = rect.width() - 40.0 - albums.size().x.max(tracks.size().x);
     let top = center - 9.0 - albums.size().y / 2.0;
     let bottom = center + 9.0 - tracks.size().y / 2.0;
     painter.galley(pos2(right - albums.size().x, top), albums, colors.muted);
     painter.galley(pos2(right - tracks.size().x, bottom), tracks, colors.muted);
-    let font = strong(15.0);
+    let font = strong(Size::LEAD);
     let name_height = painter.fonts_mut(|f| f.row_height(&font));
     clipped(
         painter,
@@ -768,7 +769,7 @@ fn album_grid(
                                 ui.painter(),
                                 pos2(x, rect.top() + tile + 44.0),
                                 &detail,
-                                regular(11.5),
+                                regular(Size::SMALL),
                                 colors.muted,
                                 tile,
                             );
@@ -813,24 +814,109 @@ fn tile_actions(catalog: &Catalog, events: Vec<TileEvent>, actions: &mut Vec<Act
 
 // ---- shared page pieces ---------------------------------------------------
 
-fn page_title(
+/// Height of the title row at the top of a page.
+const HEADER: f32 = 34.0;
+
+/// The back arrow. It sits in the page's left margin, level with the title
+/// row, so that titles and content keep one left edge with or without it.
+fn back_button(ui: &mut Ui) -> bool {
+    let colors = theme::colors(ui.ctx());
+    let page = ui.max_rect();
+    let centre = pos2(page.left() - 13.0, page.top() + HEADER / 2.0);
+    let rect = Rect::from_center_size(centre, vec2(26.0, HEADER));
+    let response = ui.interact(rect, Id::unique("page-back"), Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Back"));
+    if response.hovered() {
+        ui.painter()
+            .circle_filled(centre, 12.0, colors.surface_hi.gamma_multiply(0.8));
+    }
+    let color = if response.hovered() {
+        colors.text
+    } else {
+        colors.muted
+    };
+    paint_icon(
+        ui.painter(),
+        Rect::from_center_size(centre, Vec2::splat(17.0)),
+        Icon::Back,
+        color,
+    );
+    response
+        .on_hover_cursor(CursorIcon::PointingHand)
+        .on_hover_text("Back")
+        .clicked()
+}
+
+/// Reserves the title row. Pages whose subtitle depends on the filters below
+/// it reserve first and fill the row with [`page_header_in`] afterwards.
+fn header_slot(ui: &mut Ui) -> Rect {
+    let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER), Sense::hover());
+    ui.add_space(12.0);
+    slot
+}
+
+/// The title row of a page: the title, a quieter subtitle on the same
+/// baseline, and the page's own controls against the right edge.
+fn page_header(ui: &mut Ui, title: &str, subtitle: &str, controls: impl FnOnce(&mut Ui)) {
+    let slot = header_slot(ui);
+    page_header_in(ui, slot, title, subtitle, controls);
+}
+
+fn page_header_in(
     ui: &mut Ui,
-    can_go_back: bool,
+    slot: Rect,
     title: &str,
     subtitle: &str,
-    actions: &mut Vec<Action>,
+    controls: impl FnOnce(&mut Ui),
 ) {
     let colors = theme::colors(ui.ctx());
-    ui.horizontal(|ui| {
-        if can_go_back && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked() {
-            actions.push(Action::Back);
-        }
-        ui.label(RichText::new(title).font(strong(26.0)).color(colors.text));
-        if !subtitle.is_empty() {
-            ui.add_space(4.0);
-            ui.label(RichText::new(subtitle).color(colors.muted));
-        }
-    });
+    let mut side = ui.new_child(
+        UiBuilder::new()
+            .id_salt("page-controls")
+            .max_rect(slot)
+            .layout(Layout::right_to_left(Align::Center)),
+    );
+    controls(&mut side);
+    let used = side.min_rect();
+    let right = if used.width() > 0.0 {
+        used.left() - 16.0
+    } else {
+        slot.right()
+    };
+    let title = theme::line(
+        ui.painter(),
+        title,
+        strong(Size::TITLE),
+        colors.text,
+        (right - slot.left()).max(8.0),
+    );
+    let top = slot.center().y - title.size().y / 2.0;
+    let title = label_at(ui, "page-title", pos2(slot.left(), top), title);
+    let left = title.right() + 12.0;
+    if !subtitle.is_empty() && right - left > 40.0 {
+        let subtitle = theme::line(
+            ui.painter(),
+            subtitle,
+            regular(Size::BODY),
+            colors.muted,
+            right - left,
+        );
+        let drop = Size::ASCENT * (Size::TITLE - Size::BODY);
+        label_at(ui, "page-subtitle", pos2(left, top + drop), subtitle);
+    }
+}
+
+/// Places laid-out text as a label, so that assistive technology can read it.
+fn label_at(ui: &mut Ui, salt: &str, pos: egui::Pos2, text: Arc<egui::Galley>) -> Rect {
+    let rect = Rect::from_min_size(pos, text.size());
+    ui.new_child(
+        UiBuilder::new()
+            .id_salt(salt)
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Min)),
+    )
+    .add(egui::Label::new(text));
+    rect
 }
 
 /// Play, Shuffle and a menu with the queue commands. `rtl` is for right-to-left layouts.
@@ -901,7 +987,11 @@ fn centered_message(ui: &mut Ui, spinner: bool, title: &str, body: &str) {
             ui.add(egui::Spinner::new().size(28.0).color(colors.accent_text));
             ui.add_space(10.0);
         }
-        ui.label(RichText::new(title).font(strong(17.0)).color(colors.text));
+        ui.label(
+            RichText::new(title)
+                .font(strong(Size::HEADING))
+                .color(colors.text),
+        );
         if !body.is_empty() {
             ui.add_space(2.0);
             ui.label(RichText::new(body).color(colors.muted));
@@ -938,12 +1028,12 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(
                     RichText::new(APP_NAME)
-                        .font(strong(15.5))
+                        .font(strong(Size::LEAD))
                         .color(colors.text),
                 );
                 ui.label(
                     RichText::new("Player for iBroadcast")
-                        .font(regular(10.5))
+                        .font(regular(Size::MICRO))
                         .color(colors.muted),
                 );
             });
@@ -1014,20 +1104,20 @@ impl App {
                 catalog.map(|c| c.artist_count(ArtistRole::Album)),
             ),
             (
-                Icon::Artist,
+                Icon::Microphone,
                 ArtistRole::Track.label(),
                 Page::Artists(ArtistRole::Track),
                 catalog.map(|c| c.artist_count(ArtistRole::Track)),
             ),
-            (Icon::Search, "Browse", Page::Browse, None),
+            (Icon::Grid, "Browse", Page::Browse, None),
             (
-                Icon::Note,
+                Icon::Star(false),
                 "Favourites",
                 Page::Collection(Collection::Favourites),
                 None,
             ),
             (
-                Icon::Note,
+                Icon::Clock,
                 "Recently played",
                 Page::Collection(Collection::Recent),
                 None,
@@ -1074,12 +1164,12 @@ impl App {
                         ui.spacing_mut().item_spacing.y = 1.0;
                         for (index, playlist) in catalog.library.playlists.iter().enumerate() {
                             let selected = page == Page::Playlist(index);
-                            let label = if playlist.folder {
-                                format!("▸ {}", playlist.title)
+                            let icon = if playlist.folder {
+                                Icon::Folder
                             } else {
-                                playlist.title.clone()
+                                Icon::Playlist
                             };
-                            if nav_item(ui, Some(Icon::Playlist), &label, None, selected).clicked() {
+                            if nav_item(ui, Some(icon), &playlist.title, None, selected).clicked() {
                                 actions.push(Action::Go(Page::Playlist(index)));
                             }
                         }
@@ -1110,7 +1200,7 @@ impl App {
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 ui.visuals_mut().hyperlink_color = colors.warn;
                 let reconnect =
-                    RichText::new("No audio output. Click to reconnect").font(regular(11.5));
+                    RichText::new("No audio output. Click to reconnect").font(regular(Size::SMALL));
                 if ui.link(reconnect).on_hover_text(error.as_str()).clicked() {
                     actions.push(Action::RecoverOutput);
                 }
@@ -1121,7 +1211,12 @@ impl App {
             ui.spacing_mut().item_spacing.x = 5.0;
             self.show_ibroadcast_badge(ui, 92.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let settings = theme::icon_button(ui, Icon::More, 28.0, colors.muted, "Settings");
+                let tip = if cfg!(target_os = "macos") {
+                    "Settings (⌘,)"
+                } else {
+                    "Settings (Ctrl+,)"
+                };
+                let settings = theme::icon_button(ui, Icon::Settings, 28.0, colors.muted, tip);
                 settings.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Settings")
                 });
@@ -1131,7 +1226,7 @@ impl App {
                 if self.loading.is_some() {
                     ui.label(
                         RichText::new("Updating")
-                            .font(regular(11.5))
+                            .font(regular(Size::SMALL))
                             .color(colors.muted),
                     );
                     ui.add(egui::Spinner::new().size(12.0).color(colors.accent_text));
@@ -1152,7 +1247,7 @@ impl App {
                         .corner_radius(10)
                         .inner_margin(egui::Margin::symmetric(8, 2))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(plan).font(strong(11.5)).color(text));
+                            ui.label(RichText::new(plan).font(strong(Size::SMALL)).color(text));
                         });
                 }
             });
@@ -1191,39 +1286,40 @@ impl App {
             }
             return;
         }
-        let back = !self.history.is_empty();
+        if !self.history.is_empty() && back_button(ui) {
+            actions.push(Action::Back);
+        }
         match self.page.clone() {
-            Page::Songs => self.songs_page(ui, back, actions),
-            Page::Albums => self.albums_page(ui, back, None, actions),
+            Page::Songs => self.songs_page(ui, actions),
+            Page::Albums => self.albums_page(ui, None, actions),
             Page::Artists(role) => {
-                ui.push_id(role, |ui| self.artists_page(ui, role, back, actions));
+                ui.push_id(role, |ui| self.artists_page(ui, role, actions));
             }
             Page::Album(id) => self.album_page(ui, id, actions),
             Page::Artist(role, key) => {
                 ui.push_id((role, &key), |ui| self.artist_page(ui, role, &key, actions));
             }
-            Page::Playlist(index) => self.playlist_page(ui, index, back, actions),
-            Page::Queue => self.queue_page(ui, back, actions),
-            Page::Search => self.search_page(ui, back, actions),
+            Page::Playlist(index) => self.playlist_page(ui, index, actions),
+            Page::Queue => self.queue_page(ui, actions),
+            Page::Search => self.search_page(ui, actions),
             Page::Browse => self.browse_page(ui, actions),
-            Page::BrowseAlbums(group) => self.albums_page(ui, back, Some(&group), actions),
+            Page::BrowseAlbums(group) => self.albums_page(ui, Some(&group), actions),
             Page::Collection(collection) => self.collection_page(ui, collection, actions),
         }
     }
 
     fn browse_page(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
-        let colors = theme::colors(ui.ctx());
         let browse = &mut self.browse;
         let previous = browse.kind;
+        let header = header_slot(ui);
         ui.horizontal(|ui| {
-            if !self.history.is_empty()
-                && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked()
-            {
-                actions.push(Action::Back);
-            }
             for kind in [BrowseKind::Genres, BrowseKind::Tags, BrowseKind::Years] {
                 if ui
-                    .add(egui::Button::new(kind.label()).selected(browse.kind == kind))
+                    .add(
+                        egui::Button::new(kind.label())
+                            .selected(browse.kind == kind)
+                            .min_size(vec2(74.0, 32.0)),
+                    )
                     .clicked()
                 {
                     browse.kind = kind;
@@ -1241,8 +1337,6 @@ impl App {
             };
         }
         let label = browse.kind.label();
-        ui.add_space(10.0);
-        ui.label(RichText::new(label).font(strong(34.0)).color(colors.text));
         ui.add_space(8.0);
         let singular = match browse.kind {
             BrowseKind::Genres => "genre",
@@ -1297,9 +1391,9 @@ impl App {
         let rows = browse
             .rows
             .get_or_insert_with(|| GroupSummary::order(groups, &browse.query, browse.sort));
-        ui.add_space(8.0);
-        ui.label(RichText::new(count(rows.len(), singular, &plural)).color(colors.muted));
-        ui.add_space(8.0);
+        let found = count(rows.len(), singular, &plural);
+        page_header_in(ui, header, "Browse", &found, |_| ());
+        ui.add_space(14.0);
         if rows.is_empty() {
             centered_message(ui, false, &format!("No {plural} found"), "");
             return;
@@ -1424,19 +1518,9 @@ impl App {
             Collection::Favourites => "Favourites",
             Collection::Recent => "Recently played",
         };
-        ui.horizontal(|ui| {
-            page_title(
-                ui,
-                !self.history.is_empty(),
-                title,
-                &count(rows.len(), "song", "songs"),
-                actions,
-            );
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                play_buttons_reversed(ui, &rows, actions)
-            });
+        page_header(ui, title, &count(rows.len(), "song", "songs"), |ui| {
+            play_buttons_reversed(ui, &rows, actions)
         });
-        ui.add_space(10.0);
         if rows.is_empty() {
             centered_message(ui, false, "No songs", "");
             return;
@@ -1466,7 +1550,7 @@ impl App {
         row_actions(catalog, &rows, events, &mut self.selected, None, actions);
     }
 
-    fn songs_page(&mut self, ui: &mut Ui, back: bool, actions: &mut Vec<Action>) {
+    fn songs_page(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
         let (sort, descending) = self.song_sort;
         let now = self.now();
         let selected = self.selected;
@@ -1477,13 +1561,9 @@ impl App {
             count(order.len(), "song", "songs"),
             format_length(catalog.total_seconds)
         );
-        ui.horizontal(|ui| {
-            page_title(ui, back, "Songs", &subtitle, actions);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                play_buttons_reversed(ui, &order, actions);
-            });
+        page_header(ui, "Songs", &subtitle, |ui| {
+            play_buttons_reversed(ui, &order, actions)
         });
-        ui.add_space(10.0);
         let mut events = Vec::new();
         let style = ListStyle {
             number: Number::Index,
@@ -1514,13 +1594,7 @@ impl App {
         row_actions(catalog, &order, events, &mut self.selected, None, actions);
     }
 
-    fn albums_page(
-        &mut self,
-        ui: &mut Ui,
-        back: bool,
-        group: Option<&BrowseGroup>,
-        actions: &mut Vec<Action>,
-    ) {
+    fn albums_page(&mut self, ui: &mut Ui, group: Option<&BrowseGroup>, actions: &mut Vec<Action>) {
         let colors = theme::colors(ui.ctx());
         let playing_album = self.playing_album();
         let catalog = self.catalog.as_mut().unwrap();
@@ -1547,8 +1621,7 @@ impl App {
         let total = selected
             .as_ref()
             .map_or(catalog.albums.len(), |rows| rows.slots.len());
-        page_title(ui, back, title, &count(total, "album", "albums"), actions);
-        ui.add_space(8.0);
+        page_header(ui, title, &count(total, "album", "albums"), |_| ());
         let mut reset = false;
         ui.horizontal_wrapped(|ui| {
             let current = self.settings.album_sort;
@@ -1678,13 +1751,7 @@ impl App {
         });
     }
 
-    fn artists_page(
-        &mut self,
-        ui: &mut Ui,
-        role: ArtistRole,
-        back: bool,
-        actions: &mut Vec<Action>,
-    ) {
+    fn artists_page(&mut self, ui: &mut Ui, role: ArtistRole, actions: &mut Vec<Action>) {
         let colors = theme::colors(ui.ctx());
         let catalog = self.catalog.as_ref().unwrap();
         let browser = &mut self.artist_browsers[role as usize];
@@ -1694,9 +1761,7 @@ impl App {
         };
         let title = role.label();
         let plural = title.to_ascii_lowercase();
-        let singular = role.singular().to_ascii_lowercase();
-        page_title(ui, back, title, "", actions);
-        ui.add_space(12.0);
+        let header = header_slot(ui);
         let mut reset = false;
         ui.horizontal(|ui| {
             let clear = !browser.query.is_empty();
@@ -1718,7 +1783,7 @@ impl App {
                 reset = true;
             }
         });
-        ui.add_space(6.0);
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             let sort = *artist_sort;
             let name = match sort {
@@ -1767,9 +1832,9 @@ impl App {
             }
         }
         let order = browser.rows.as_deref().unwrap_or_default();
-        ui.add_space(12.0);
-        ui.label(RichText::new(count(order.len(), &singular, &plural)).color(colors.muted));
-        ui.add_space(8.0);
+        let found = count(order.len(), "artist", "artists");
+        page_header_in(ui, header, title, &found, |_| ());
+        ui.add_space(14.0);
         if order.is_empty() {
             centered_message(ui, false, &format!("No {plural} found"), "");
             return;
@@ -1821,17 +1886,10 @@ impl App {
             return;
         };
         let album = &catalog.albums[index];
-        let back = !self.history.is_empty();
         let texture = self.art.get(
             album.artwork,
             catalog.library.artwork_url(album.artwork, 300),
         );
-        ui.horizontal(|ui| {
-            if back && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked() {
-                actions.push(Action::Back);
-            }
-        });
-        ui.add_space(2.0);
         ui.horizontal_top(|ui| {
             let (cover, _) = ui.allocate_exact_size(Vec2::splat(168.0), Sense::hover());
             theme::cover(ui.painter(), cover, texture, 10, &album.name);
@@ -1841,13 +1899,13 @@ impl App {
                 ui.add_space(24.0);
                 ui.label(
                     RichText::new("ALBUM")
-                        .font(strong(11.0))
+                        .font(strong(Size::MICRO))
                         .color(colors.faint),
                 );
                 ui.add(
                     egui::Label::new(
                         RichText::new(&album.name)
-                            .font(strong(28.0))
+                            .font(strong(Size::TITLE))
                             .color(colors.text),
                     )
                     .wrap(),
@@ -1855,7 +1913,7 @@ impl App {
                 let artist = ui.add(
                     egui::Label::new(
                         RichText::new(&album.artist)
-                            .font(strong(14.5))
+                            .font(strong(Size::LEAD))
                             .color(colors.accent_text),
                     )
                     .sense(Sense::click()),
@@ -1886,7 +1944,7 @@ impl App {
                                 for genre in genres {
                                     let button = egui::Button::new(
                                         RichText::new(genre)
-                                            .font(regular(11.5))
+                                            .font(regular(Size::SMALL))
                                             .color(colors.accent_text),
                                     )
                                     .truncate()
@@ -1909,16 +1967,16 @@ impl App {
                         .albums
                         .iter()
                         .any(|id| catalog.album_index.get(id) == Some(&index));
-                    let label = if saved { "★" } else { "☆" };
-                    if ui
-                        .button(label)
-                        .on_hover_text(if saved {
-                            "Remove local favourite"
-                        } else {
-                            "Save local favourite"
-                        })
-                        .clicked()
-                    {
+                    let (color, tip) = if saved {
+                        (colors.accent_text, "Remove local favourite")
+                    } else {
+                        (colors.muted, "Save local favourite")
+                    };
+                    let star = theme::icon_button(ui, Icon::Star(saved), 34.0, color, tip);
+                    star.widget_info(|| {
+                        egui::WidgetInfo::selected(egui::Role::Button, true, saved, tip)
+                    });
+                    if star.clicked() {
                         actions.push(Action::ToggleFavourite(album.id));
                     }
                 });
@@ -1969,7 +2027,6 @@ impl App {
 
     fn artist_page(&mut self, ui: &mut Ui, role: ArtistRole, key: &str, actions: &mut Vec<Action>) {
         let colors = theme::colors(ui.ctx());
-        let back = !self.history.is_empty();
         let playing_album = self.playing_album();
         let catalog = self.catalog.as_ref().unwrap();
         let Some(artist) = catalog.artist_by_key(key, role) else {
@@ -1979,9 +2036,6 @@ impl App {
         let credits = artist.credits(role).unwrap();
         let texture = artist_texture(&mut self.art, catalog, artist, credits.artwork);
         ui.horizontal(|ui| {
-            if back && theme::icon_button(ui, Icon::Back, 30.0, colors.muted, "Back").clicked() {
-                actions.push(Action::Back);
-            }
             let (avatar, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
             artist_picture(ui.painter(), avatar, texture, &artist.name, 32);
             ui.add_space(6.0);
@@ -1989,7 +2043,7 @@ impl App {
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(&artist.name)
-                        .font(strong(26.0))
+                        .font(strong(Size::TITLE))
                         .color(colors.text),
                 );
                 ui.label(
@@ -2022,7 +2076,7 @@ impl App {
         );
     }
 
-    fn playlist_page(&mut self, ui: &mut Ui, index: usize, back: bool, actions: &mut Vec<Action>) {
+    fn playlist_page(&mut self, ui: &mut Ui, index: usize, actions: &mut Vec<Action>) {
         let now = self.now();
         let selected = self.selected;
         let catalog = self.catalog.as_ref().unwrap();
@@ -2031,14 +2085,19 @@ impl App {
             return;
         };
         if playlist.folder {
-            page_title(ui, back, &playlist.title, "Playlist folder", actions);
+            page_header(ui, &playlist.title, "Playlist folder", |_| ());
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for child in &playlist.tracks {
                     if let Some(index) = catalog.playlist_index(*child)
                         && catalog.library.playlists[index].id != playlist.id
                     {
                         let child = &catalog.library.playlists[index];
-                        if nav_item(ui, Some(Icon::Playlist), &child.title, None, false).clicked() {
+                        let icon = if child.folder {
+                            Icon::Folder
+                        } else {
+                            Icon::Playlist
+                        };
+                        if nav_item(ui, Some(icon), &child.title, None, false).clicked() {
                             actions.push(Action::Go(Page::Playlist(index)));
                         }
                     }
@@ -2053,13 +2112,9 @@ impl App {
             count(rows.len(), "song", "songs"),
             format_length(seconds)
         );
-        ui.horizontal(|ui| {
-            page_title(ui, back, &playlist.title, &subtitle, actions);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                play_buttons_reversed(ui, &rows, actions);
-            });
+        page_header(ui, &playlist.title, &subtitle, |ui| {
+            play_buttons_reversed(ui, &rows, actions)
         });
-        ui.add_space(10.0);
         if rows.is_empty() {
             centered_message(ui, false, "This playlist is empty", "");
             return;
@@ -2087,7 +2142,7 @@ impl App {
         row_actions(catalog, &rows, events, &mut self.selected, None, actions);
     }
 
-    fn queue_page(&mut self, ui: &mut Ui, back: bool, actions: &mut Vec<Action>) {
+    fn queue_page(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
         let (_, playing) = self.now();
         let seconds: f64 = self.queue.items.iter().map(|e| e.track.seconds).sum();
         let subtitle = if self.queue.is_empty() {
@@ -2099,22 +2154,17 @@ impl App {
                 format_length(seconds)
             )
         };
-        ui.horizontal(|ui| {
-            page_title(ui, back, "Queue", &subtitle, actions);
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let upcoming = self
-                    .queue
-                    .current
-                    .map_or(self.queue.len(), |c| self.queue.len() - c - 1);
-                if ui
-                    .add_enabled(upcoming > 0, egui::Button::new("Clear upcoming"))
-                    .clicked()
-                {
+        let upcoming = self
+            .queue
+            .current
+            .map_or(self.queue.len(), |c| self.queue.len() - c - 1);
+        page_header(ui, "Queue", &subtitle, |ui| {
+            ui.add_enabled_ui(upcoming > 0, |ui| {
+                if theme::pill(ui, None, "Clear upcoming", false).clicked() {
                     actions.push(Action::QueueClear);
                 }
             });
         });
-        ui.add_space(10.0);
         if self.queue.is_empty() {
             centered_message(
                 ui,
@@ -2210,7 +2260,7 @@ impl App {
         }
     }
 
-    fn search_page(&mut self, ui: &mut Ui, back: bool, actions: &mut Vec<Action>) {
+    fn search_page(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
         let colors = theme::colors(ui.ctx());
         let now = self.now();
         let selected = self.selected;
@@ -2226,8 +2276,7 @@ impl App {
                 results
             }
         };
-        page_title(ui, back, "Search", &format!("“{query}”"), actions);
-        ui.add_space(8.0);
+        page_header(ui, "Search", &format!("“{query}”"), |_| ());
         if results.artists.is_empty() && results.albums.is_empty() && results.tracks.is_empty() {
             centered_message(ui, false, "No results", "Try fewer or different words.");
             return;
@@ -2277,7 +2326,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format!("ALBUMS · {}", results.albums.len()))
-                                .font(strong(11.0))
+                                .font(strong(Size::MICRO))
                                 .color(colors.faint),
                         );
                         if results.albums.len() > columns * 2 {
@@ -2325,7 +2374,11 @@ impl App {
                     } else {
                         format!("SONGS · {}", results.tracks.len())
                     };
-                    ui.label(RichText::new(label).font(strong(11.0)).color(colors.faint));
+                    ui.label(
+                        RichText::new(label)
+                            .font(strong(Size::MICRO))
+                            .color(colors.faint),
+                    );
                     ui.add_space(4.0);
                     let style = ListStyle {
                         number: Number::Index,
@@ -2401,7 +2454,7 @@ impl App {
                     ui.painter(),
                     pos2(x, cover.top() + 6.0),
                     &track.title,
-                    strong(14.0),
+                    strong(Size::LEAD),
                     colors.text,
                     width,
                 );
@@ -2433,7 +2486,7 @@ impl App {
                     ui.painter(),
                     pos2(x, cover.top() + 27.0),
                     &line,
-                    regular(12.5),
+                    regular(Size::SMALL),
                     color,
                     width,
                 );
@@ -2460,7 +2513,7 @@ impl App {
                         ui.painter(),
                         pos2(x, cover.top() + 44.0),
                         &track.album,
-                        regular(12.0),
+                        regular(Size::SMALL),
                         colors.faint,
                         width,
                     );
@@ -2474,7 +2527,7 @@ impl App {
                     pos2(cover.right() + 12.0, cover.center().y),
                     Align2::LEFT_CENTER,
                     "Nothing playing",
-                    regular(13.0),
+                    regular(Size::BODY),
                     colors.faint,
                 );
             }
@@ -2626,7 +2679,7 @@ impl App {
             } else {
                 String::new()
             },
-            regular(11.5),
+            regular(Size::SMALL),
             colors.muted,
         );
         ui.painter().text(
@@ -2637,7 +2690,7 @@ impl App {
                 (true, None) => "–:––".into(),
                 _ => String::new(),
             },
-            regular(11.5),
+            regular(Size::SMALL),
             colors.muted,
         );
         if let (Some(fraction), Some(duration)) = (release, duration) {
@@ -2717,9 +2770,9 @@ impl App {
             None => String::new(),
         };
         if has_track && !route.is_empty() {
-            let galley = ui
-                .painter()
-                .layout_no_wrap(route.clone(), regular(11.0), colors.muted);
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(route.clone(), regular(Size::MICRO), colors.muted);
             let badge = Rect::from_min_size(
                 pos2(queue_rect.left() - 12.0 - galley.size().x - 14.0, vy - 10.0),
                 vec2(galley.size().x + 14.0, 20.0),
@@ -2823,12 +2876,16 @@ fn section_label(ui: &mut Ui, text: &str) {
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.add_space(8.0);
-        ui.label(RichText::new(text).font(strong(10.5)).color(colors.faint));
+        ui.label(
+            RichText::new(text)
+                .font(strong(Size::MICRO))
+                .color(colors.faint),
+        );
     });
     ui.add_space(2.0);
 }
 
-fn nav_item(
+pub(super) fn nav_item(
     ui: &mut Ui,
     icon: Option<Icon>,
     label: &str,
@@ -2837,6 +2894,9 @@ fn nav_item(
 ) -> egui::Response {
     let colors = theme::colors(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+    let enabled = ui.is_enabled();
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, selected, label));
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let fill = if selected {
@@ -2872,9 +2932,9 @@ fn nav_item(
             pos2(x, rect.center().y - 9.0),
             label,
             if selected {
-                strong(13.5)
+                strong(Size::BODY)
             } else {
-                regular(13.5)
+                regular(Size::BODY)
             },
             if selected { colors.text } else { color },
             rect.right() - x - count_w - 8.0,
@@ -2884,10 +2944,11 @@ fn nav_item(
                 pos2(rect.right() - 10.0, rect.center().y),
                 Align2::RIGHT_CENTER,
                 text,
-                regular(11.5),
+                regular(Size::SMALL),
                 colors.faint,
             );
         }
+        theme::focus_ring(ui, &response, rect, CornerRadius::same(7));
     }
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -2962,8 +3023,11 @@ fn artist_card(
     let width = (rect.width() - 2.0 * pad).max(1.0);
     let image = Rect::from_min_size(rect.min + vec2(pad, pad), Vec2::splat(width));
     artist_picture(painter, image, texture, &artist.name, 8);
-    let mut title =
-        egui::text::LayoutJob::simple_singleline(artist.name.clone(), strong(15.0), colors.text);
+    let mut title = egui::text::LayoutJob::simple_singleline(
+        artist.name.clone(),
+        strong(Size::LEAD),
+        colors.text,
+    );
     title.wrap = egui::text::TextWrapping::truncate_at_width(width);
     let name = painter.layout_job(title);
     painter.galley(
@@ -2975,7 +3039,7 @@ fn artist_card(
         pos2(rect.center().x, image.bottom() + 36.0),
         Align2::CENTER_TOP,
         subtitle,
-        regular(12.5),
+        regular(Size::SMALL),
         colors.muted,
     );
     response
@@ -3076,5 +3140,103 @@ mod grid_tests {
         assert!(show(None, false) > 0);
         assert_eq!(show(None, true), 0);
         assert_eq!(show(None, false), 0);
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::*;
+
+    /// Draws a header in a 640-point page and returns its named parts.
+    fn parts(title: &str, subtitle: &str, button: bool) -> Vec<(String, Rect)> {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        ctx.enable_accesskit();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 200.0))),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            page_header(ui, title, subtitle, |ui| {
+                if button {
+                    let _ = ui.button("Play");
+                }
+            });
+        });
+        output.textures_delta.clear();
+        output
+            .platform_output
+            .accesskit_update
+            .into_iter()
+            .flat_map(|update| update.nodes)
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                let rect = Rect::from_min_max(
+                    pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                Some((node.label().or(node.value())?.to_owned(), rect))
+            })
+            .collect()
+    }
+
+    fn part(parts: &[(String, Rect)], start: &str) -> Option<Rect> {
+        let found = parts.iter().find(|(name, _)| name.starts_with(start));
+        found.map(|(_, rect)| *rect)
+    }
+
+    #[test]
+    fn the_back_arrow_in_the_page_margin_takes_clicks() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut clicked = false;
+        let mut frame = |events| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                egui::Frame::new().inner_margin(26).show(ui, |ui| {
+                    clicked |= back_button(ui);
+                    ui.allocate_space(ui.available_size());
+                });
+            });
+            output.textures_delta.clear();
+        };
+        let pos = pos2(13.0, 26.0 + HEADER / 2.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(Vec::new());
+        frame(vec![egui::Event::PointerMoved(pos)]);
+        frame(vec![button(true)]);
+        frame(vec![button(false)]);
+        assert!(clicked);
+    }
+
+    #[test]
+    fn title_and_subtitle_share_a_baseline_at_the_page_edge() {
+        let parts = parts("Albums", "12 albums", false);
+        let title = part(&parts, "Albums").unwrap();
+        let subtitle = part(&parts, "12 albums").unwrap();
+        assert!(title.left() < 1.0);
+        assert!(subtitle.left() > title.right());
+        let baseline = |rect: Rect, size: f32| rect.top() + Size::ASCENT * size;
+        let gap = baseline(title, Size::TITLE) - baseline(subtitle, Size::BODY);
+        assert!(gap.abs() < 0.5, "baselines differ by {gap}");
+    }
+
+    #[test]
+    fn a_long_title_ends_before_the_controls_and_drops_its_subtitle() {
+        let parts = parts(&"Long title ".repeat(12), "12 songs", true);
+        let title = part(&parts, "Long title").unwrap();
+        let button = part(&parts, "Play").unwrap();
+        assert!(title.right() <= button.left() - 16.0);
+        assert!(title.width() > 300.0);
+        assert!(part(&parts, "12 songs").is_none());
     }
 }

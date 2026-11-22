@@ -260,6 +260,7 @@ pub struct Catalog {
     pub library: Library,
     pub by_id: HashMap<u64, usize>,
     playlists_by_id: HashMap<u64, usize>,
+    pub playlist_count: usize,
     groups: HashMap<BrowseKind, Vec<GroupSummary>>,
     pub albums: Vec<Album>,
     pub album_index: HashMap<u64, usize>,
@@ -508,17 +509,18 @@ impl Catalog {
         }
         let total_seconds = library.tracks.iter().map(|t| t.seconds).sum();
 
-        let playlists_by_id = library
-            .playlists
-            .iter()
-            .enumerate()
-            .map(|(index, list)| (list.id, index))
-            .collect();
+        let mut playlists_by_id = HashMap::with_capacity(library.playlists.len());
+        let mut playlist_count = 0;
+        for (index, list) in library.playlists.iter().enumerate() {
+            playlists_by_id.insert(list.id, index);
+            playlist_count += usize::from(!list.folder);
+        }
         let mut catalog = Self {
             genre_labels: library.genres.keys().cloned().collect(),
             library,
             by_id,
             playlists_by_id,
+            playlist_count,
             groups: HashMap::new(),
             albums,
             album_index,
@@ -940,6 +942,18 @@ mod tests {
             .iter()
             .map(|&index| catalog.track(index).id)
             .collect()
+    }
+
+    #[test]
+    fn library_count_excludes_playlist_folders_but_keeps_them_navigable() {
+        let mut data = two_discs();
+        data["library"]["playlists"] = json!({
+            "11": {"name": "Mix", "tracks": [101]},
+            "12": {"name": "Folder", "type": "folder", "tracks": [11]}
+        });
+        let catalog = Catalog::new(Library::parse(&data).unwrap());
+        assert_eq!(catalog.playlist_count, 1);
+        assert!(catalog.playlist_index(12).is_some());
     }
 
     #[test]

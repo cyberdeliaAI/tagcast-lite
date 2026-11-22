@@ -72,6 +72,8 @@ pub struct Output {
     state: Arc<Mutex<OutputState>>,
     pub rate: u32,
     capacity: usize,
+    /// The device this output plays through, when the system names it.
+    pub device_name: Option<Arc<str>>,
 }
 
 struct OutputState {
@@ -130,6 +132,7 @@ impl Output {
             state: Arc::new(Mutex::new(state)),
             rate,
             capacity,
+            device_name: None,
         }
     }
 
@@ -329,7 +332,8 @@ impl Output {
             .default_output_device()
             .ok_or("No default audio output")?;
         let supported = device.default_output_config()?;
-        let output = Self::new(supported.sample_rate().0);
+        let mut output = Self::new(supported.sample_rate().0);
+        output.device_name = device.name().ok().map(Into::into);
         let config = supported.config();
         let stream = match supported.sample_format() {
             cpal::SampleFormat::F32 => device_stream::<f32>(&device, &config, &output)?,
