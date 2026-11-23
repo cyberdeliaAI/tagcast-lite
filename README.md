@@ -253,6 +253,15 @@ Every track then plays the given loopback file and covers load from
 `<art server>/artwork/<id>-300`. `TAGCAST_PLAYER_FIXTURE=signin` shows the
 sign-in screen with a sample code. Release builds leave all of this out.
 
+## A note on AI usage
+
+I use AI to help debug problems, review code and explore technical options for
+Tagcast Lite. Sometimes I also use it to help implement a change.
+
+I decide how the player should work, from its architecture to its interface.
+I review, test and refine AI-assisted changes before they go into the project.
+I take responsibility for the quality, reliability and direction of every release.
+
 ## Credits
 
 Tagcast Lite is an independent player for iBroadcast. The Powered by iBroadcast
