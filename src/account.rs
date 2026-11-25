@@ -33,7 +33,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const READ_TIMEOUT: Duration = Duration::from_secs(8);
 const LIBRARY_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const LIBRARY_LIMIT: usize = 192 * 1024 * 1024;
-const LIBRARY_FORMAT: u32 = 7;
+const LIBRARY_FORMAT: u32 = 8;
 const UPLOAD_METADATA_FORMAT: u32 = 4;
 const OLDEST_LIBRARY_FORMAT: u32 = 3;
 const ARTWORK_SERVER: &str = "https://artwork.ibroadcast.com";
@@ -791,6 +791,8 @@ pub struct Track {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Playlist {
     pub id: u64,
+    #[serde(default)]
+    pub artwork: u64,
     pub title: String,
     pub tracks: Vec<u64>,
     pub folder: bool,
@@ -1174,6 +1176,7 @@ impl Library {
                 if let Some(ids) = entry(row, playlists, "tracks").as_array() {
                     result.playlists.push(Playlist {
                         id,
+                        artwork: number(entry(row, playlists, "artwork_id")),
                         folder: entry(row, playlists, "type") == "folder"
                             && !truth(entry(row, playlists, "system_created")),
                         title: clean(entry(row, playlists, "name").as_str().unwrap_or("Playlist")),
@@ -1355,7 +1358,11 @@ mod tests {
                     "30": ["Trashed", 41, 72, "/128/abc/30", 3, true],
                     "40": ["Invalid", 41, 72, "/128/../40", 4, false]
                 },
-                "playlists": {"map": {"name": 0, "tracks": 1}, "55": ["Set", [10, "20", 10]]}
+                "playlists": {
+                    "map": {"name": 0, "tracks": 1, "artwork_id": 2},
+                    "55": ["Set", [10, "20", 10], "123"],
+                    "56": {"name": "Weekend", "tracks": [], "artwork_id": 456}
+                }
             }
         })).unwrap();
         assert_eq!(library.expires, "1234");
@@ -1365,6 +1372,8 @@ mod tests {
         );
         assert!(library.tracks[0].search.contains("bjork"));
         assert_eq!(library.playlists[0].tracks, [10, 20, 10]);
+        assert_eq!(library.playlists[0].artwork, 123);
+        assert_eq!(library.playlists[1].artwork, 456);
     }
 
     #[test]
@@ -1431,12 +1440,16 @@ mod tests {
         };
         let mut previous = serde_json::to_value(&current).unwrap();
         previous["format"] = json!(OLDEST_LIBRARY_FORMAT);
+        previous["playlists"] =
+            json!([{"id": 5, "title": "Saved", "tracks": [20, 10], "folder": false}]);
         previous.as_object_mut().unwrap().remove("album_metadata");
         let parsed: Library = serde_json::from_value(previous).unwrap();
         assert_eq!(current.stamp().revision, "4321");
         assert_eq!(parsed.stamp().owner, "73");
         assert!(parsed.stamp().revision.is_empty());
         assert!(parsed.album_metadata.is_empty());
+        assert_eq!(parsed.playlists[0].artwork, 0);
+        assert_eq!(parsed.playlists[0].tracks, [20, 10]);
         assert!(!parsed.has_album_metadata());
         let mut v4 = current;
         v4.format = UPLOAD_METADATA_FORMAT;

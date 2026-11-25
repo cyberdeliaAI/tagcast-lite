@@ -95,8 +95,8 @@ locally saved favourites, queue and listening history.
 - **Sidebar:** Songs, Albums, Album artists, Track artists, Queue and playlist folders. Browse by
   genre, tag or year, see favourites, or return to recently listened tracks.
   Search finds artists, albums and songs as you type.
-- **Playlists:** opening a playlist shows up to four different album covers in track order.
-  The sidebar and playlist folders do not load these thumbnails.
+- **Playlists:** opening a playlist loads its custom iBroadcast cover. If the cover is missing or unavailable,
+  Lite shows up to four different album covers in track order. The sidebar and playlist folders do not load these images.
 - **Artist views:** Album artists shows album credits and Track artists shows
   the performers credited on songs. Cards open the albums for that role. Play
   on a track artist page queues that artist's credited songs. Both views have

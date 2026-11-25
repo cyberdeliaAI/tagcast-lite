@@ -2162,15 +2162,19 @@ impl App {
         );
         let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
         let cover = Rect::from_min_size(slot.min, Vec2::splat(slot.height()));
-        playlist_cover(ui, cover, &detail.covers, &mut self.art, catalog);
-        let header = Rect::from_min_max(pos2(cover.right() + 12.0, slot.top()), slot.max);
-        page_header_in(
+        let playlist = &catalog.library.playlists[index];
+        playlist_cover(
             ui,
-            header,
-            &catalog.library.playlists[index].title,
-            &subtitle,
-            |ui| play_buttons_reversed(ui, rows, actions),
+            cover,
+            playlist.artwork,
+            &detail.covers,
+            &mut self.art,
+            catalog,
         );
+        let header = Rect::from_min_max(pos2(cover.right() + 12.0, slot.top()), slot.max);
+        page_header_in(ui, header, &playlist.title, &subtitle, |ui| {
+            play_buttons_reversed(ui, rows, actions)
+        });
         ui.add_space(12.0);
         if rows.is_empty() {
             centered_message(ui, false, "This playlist is empty", "");
@@ -3129,56 +3133,77 @@ fn artist_card(
 }
 
 /// Draw directly from the shared thumbnail textures. Each tile keeps its source aspect ratio.
-fn playlist_cover(ui: &Ui, rect: Rect, covers: &[u64], art: &mut Artwork, catalog: &Catalog) {
+fn playlist_cover(
+    ui: &Ui,
+    rect: Rect,
+    custom: u64,
+    covers: &[u64],
+    art: &mut Artwork,
+    catalog: &Catalog,
+) {
     if !ui.is_rect_visible(rect) {
         return;
     }
-    let colors = theme::colors(ui.ctx());
-    let painter = ui.painter();
-    let mut tile = |area: Rect, id: Option<u64>| {
-        let (area, radius) = if covers.len() > 1 {
-            (area.shrink(0.5), 3)
-        } else {
-            (area, 6)
-        };
-        if let Some((texture, [w, h])) =
-            id.and_then(|id| art.get(id, ArtSize::Small, &catalog.library))
-        {
-            let pixels = vec2(w as f32, h as f32);
-            let scale = (area.width() / pixels.x).max(area.height() / pixels.y);
-            let uv = Rect::from_center_size(pos2(0.5, 0.5), area.size() / (pixels * scale));
-            painter.add(
-                egui::epaint::RectShape::filled(area, radius, Color32::WHITE)
-                    .with_texture(texture, uv),
-            );
-        } else {
-            painter.rect_filled(area, radius, colors.surface);
-            let icon =
-                Rect::from_center_size(area.center(), Vec2::splat(area.size().min_elem() * 0.44));
-            paint_icon(painter, icon, Icon::Playlist, colors.muted);
+    if custom != 0 {
+        let texture = art.get(custom, ArtSize::Small, &catalog.library);
+        if texture.is_some() || !art.unavailable(custom, ArtSize::Small) {
+            paint_playlist_tile(ui, rect, texture, false);
+            return;
         }
+    }
+    let mut tile = |area, id| {
+        let texture = art.get(id, ArtSize::Small, &catalog.library);
+        paint_playlist_tile(ui, area, texture, covers.len() > 1);
     };
     let (left, right) = rect.split_left_right_at_fraction(0.5);
     let (top_left, bottom_left) = left.split_top_bottom_at_fraction(0.5);
     let (top_right, bottom_right) = right.split_top_bottom_at_fraction(0.5);
     match covers {
-        [] => tile(rect, None),
-        [one] => tile(rect, Some(*one)),
+        [] => paint_playlist_tile(ui, rect, None, false),
+        [one] => tile(rect, *one),
         [a, b] => {
-            tile(left, Some(*a));
-            tile(right, Some(*b));
+            tile(left, *a);
+            tile(right, *b);
         }
         [a, b, c] => {
-            tile(left, Some(*a));
-            tile(top_right, Some(*b));
-            tile(bottom_right, Some(*c));
+            tile(left, *a);
+            tile(top_right, *b);
+            tile(bottom_right, *c);
         }
         [a, b, c, d, ..] => {
-            tile(top_left, Some(*a));
-            tile(top_right, Some(*b));
-            tile(bottom_left, Some(*c));
-            tile(bottom_right, Some(*d));
+            tile(top_left, *a);
+            tile(top_right, *b);
+            tile(bottom_left, *c);
+            tile(bottom_right, *d);
         }
+    }
+}
+
+fn paint_playlist_tile(
+    ui: &Ui,
+    area: Rect,
+    texture: Option<(egui::TextureId, [usize; 2])>,
+    mosaic: bool,
+) {
+    let (area, radius) = if mosaic {
+        (area.shrink(0.5), 3)
+    } else {
+        (area, 6)
+    };
+    let painter = ui.painter();
+    if let Some((texture, [w, h])) = texture {
+        let pixels = vec2(w as f32, h as f32);
+        let scale = (area.width() / pixels.x).max(area.height() / pixels.y);
+        let uv = Rect::from_center_size(pos2(0.5, 0.5), area.size() / (pixels * scale));
+        painter.add(
+            egui::epaint::RectShape::filled(area, radius, Color32::WHITE).with_texture(texture, uv),
+        );
+    } else {
+        let colors = theme::colors(ui.ctx());
+        painter.rect_filled(area, radius, colors.surface);
+        let icon =
+            Rect::from_center_size(area.center(), Vec2::splat(area.size().min_elem() * 0.44));
+        paint_icon(painter, icon, Icon::Playlist, colors.muted);
     }
 }
 
