@@ -225,7 +225,8 @@ mod tests {
         viewport.inner_rect = Some(egui::Rect::from_min_size(pos2(80.0, 100.0), size));
         let ctx = egui::Context::default();
         let mut mini = MiniPlayer::default();
-        let compact = ctx.run_ui(input, |ui| mini.toggle(ui.ctx()));
+        let mut compact = ctx.run_ui(input, |ui| mini.toggle(ui.ctx()));
+        compact.textures_delta.clear();
         assert!(
             compact.viewport_output[&egui::ViewportId::ROOT]
                 .commands
@@ -236,7 +237,8 @@ mod tests {
             restore_at_start: mini.library_window,
             ..Default::default()
         };
-        let restored = ctx.run_ui(Default::default(), |ui| reopened.update(ui.ctx()));
+        let mut restored = ctx.run_ui(Default::default(), |ui| reopened.update(ui.ctx()));
+        restored.textures_delta.clear();
         assert!(!reopened.active());
         assert!(
             restored.viewport_output[&egui::ViewportId::ROOT]
