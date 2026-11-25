@@ -1,3 +1,5 @@
+#![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
+
 mod gui;
 
 use std::{error::Error, process::ExitCode};
@@ -5,6 +7,14 @@ use std::{error::Error, process::ExitCode};
 use tagcast_player::{APP_NAME, account::logout};
 
 fn main() -> ExitCode {
+    #[cfg(windows)]
+    if std::env::args_os().len() > 1 {
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+
+        // CLI output can use the caller's console. Explorer launches never need a new one.
+        unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+    }
+
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

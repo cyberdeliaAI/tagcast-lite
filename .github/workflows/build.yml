@@ -114,8 +114,19 @@ jobs:
         run: |
           cargo +stable build --locked --release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & ./target/release/tagcast-player.exe --version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $exe = (Resolve-Path ./target/release/tagcast-player.exe).Path
+          Add-Type -AssemblyName System.Reflection.Metadata
+          $pe = [System.Reflection.PortableExecutable.PEReader]::new([IO.File]::OpenRead($exe))
+          try {
+            if ($pe.PEHeaders.PEHeader.Subsystem -ne 'WindowsGui') { throw 'The player would open a console window' }
+          } finally {
+            $pe.Dispose()
+          }
+          $package = (cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages[0]
+          $versionOutput = & $exe --version | Out-String
+          if ($LASTEXITCODE -ne 0 -or $versionOutput.Trim() -cne "tagcast-player $($package.version)") {
+            throw 'The updater could not read the player version from stdout'
+          }
           New-Item -ItemType Directory -Force dist/package | Out-Null
           Copy-Item target/release/tagcast-player.exe,README.md,LICENSE,assets/fonts/Inter-LICENSE.txt -Destination dist/package
           Copy-Item assets/themes/ATTRIBUTION.txt -Destination dist/package/Theme-Attribution.txt
