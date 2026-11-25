@@ -11,7 +11,7 @@ use tagcast_player::{APP_NAME, Failure, account::Track, audio::Phase, transport:
 use super::Collection;
 use super::{
     Action, App, BrowseAlbumRows, Page, Repeat,
-    artwork::Artwork,
+    artwork::{ArtSize, Artwork},
     catalog::{
         self, AlbumSort, Artist, ArtistRole, ArtistSort, BrowseGroup, BrowseKind, BrowseSort,
         Catalog, DiscSection, GroupSummary, SongSort, count, format_length, format_time,
@@ -547,10 +547,9 @@ fn album_tile(
     let response = ui.interact(rect, id, Sense::click());
     let hovered = ui.rect_contains_pointer(rect);
     let cover_rect = Rect::from_min_size(rect.min, Vec2::splat(rect.width()));
-    let texture = art.get(
-        album.artwork,
-        catalog.library.artwork_url(album.artwork, 300),
-    );
+    let texture = art
+        .get(album.artwork, ArtSize::Grid, &catalog.library)
+        .map(|image| image.0);
     let painter = ui.painter();
     theme::cover(painter, cover_rect, texture, 8, &album.name);
     if hovered {
@@ -1861,8 +1860,13 @@ impl App {
                                 Rect::from_min_size(pos2(left, rect.top()), vec2(tile, row_height));
                             if ui.is_rect_visible(card) {
                                 let credits = artist.credits(role).unwrap();
-                                let texture =
-                                    artist_texture(&mut self.art, catalog, artist, credits.artwork);
+                                let texture = artist_texture(
+                                    &mut self.art,
+                                    catalog,
+                                    artist,
+                                    credits.artwork,
+                                    ArtSize::Grid,
+                                );
                                 if artist_card(ui, card, artist, role, texture) {
                                     actions
                                         .push(Action::Go(Page::Artist(role, artist.key.clone())));
@@ -1886,10 +1890,14 @@ impl App {
             return;
         };
         let album = &catalog.albums[index];
-        let texture = self.art.get(
-            album.artwork,
-            catalog.library.artwork_url(album.artwork, 300),
-        );
+        let texture = self
+            .art
+            .get(
+                album.artwork,
+                ArtSize::album_detail(ui.ctx().pixels_per_point()),
+                &catalog.library,
+            )
+            .map(|image| image.0);
         ui.horizontal_top(|ui| {
             let (cover, _) = ui.allocate_exact_size(Vec2::splat(168.0), Sense::hover());
             theme::cover(ui.painter(), cover, texture, 10, &album.name);
@@ -2034,7 +2042,13 @@ impl App {
             return;
         };
         let credits = artist.credits(role).unwrap();
-        let texture = artist_texture(&mut self.art, catalog, artist, credits.artwork);
+        let texture = artist_texture(
+            &mut self.art,
+            catalog,
+            artist,
+            credits.artwork,
+            ArtSize::Small,
+        );
         ui.horizontal(|ui| {
             let (avatar, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
             artist_picture(ui.painter(), avatar, texture, &artist.name, 32);
@@ -2445,7 +2459,9 @@ impl App {
                 let track = &entry.track;
                 let texture = catalog.and_then(|c| {
                     let artwork = c.album_of(track).map_or(track.artwork, |a| a.artwork);
-                    self.art.get(artwork, c.library.artwork_url(artwork, 300))
+                    self.art
+                        .get(artwork, ArtSize::Small, &c.library)
+                        .map(|image| image.0)
                 });
                 theme::cover(ui.painter(), cover, texture, 6, &track.album);
                 let x = cover.right() + 12.0;
@@ -2958,17 +2974,17 @@ fn artist_texture(
     catalog: &Catalog,
     artist: &Artist,
     cover: u64,
+    size: ArtSize,
 ) -> Option<(egui::TextureId, Rect)> {
     let image = |art: &mut Artwork, id| {
-        let texture = art.get(id, catalog.library.artwork_url(id, 300))?;
-        let [width, height] = art.size(id)?;
+        let (texture, [width, height]) = art.get(id, size, &catalog.library)?;
         let side = width.min(height) as f32;
         let size = vec2(side / width as f32, side / height as f32);
         Some((texture, Rect::from_center_size(pos2(0.5, 0.5), size)))
     };
     if let Some(&portrait) = catalog.library.artist_portraits.get(&artist.key) {
         let texture = image(art, portrait);
-        if texture.is_some() || !art.unavailable(portrait) {
+        if texture.is_some() || !art.unavailable(portrait, size) {
             return texture;
         }
     }

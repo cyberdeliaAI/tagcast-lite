@@ -13,7 +13,7 @@ use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use reqwest::{Client, redirect::Policy};
 use tokio::{runtime::Runtime, sync::Semaphore};
 
-/// About 64 MB of decoded 300 px covers.
+const TEXTURE_BUDGET: usize = 64 * 1024 * 1024;
 const MAX_TEXTURES: usize = 180;
 const MAX_BYTES: usize = 6 * 1024 * 1024;
 /// A queued fetch is dropped when nothing asked for its cover for this long.
@@ -21,6 +21,28 @@ const STALE: Duration = Duration::from_millis(1500);
 
 /// A failed download is tried again after this long.
 const RETRY: Duration = Duration::from_secs(30);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ArtSize {
+    Small = 150,
+    Grid = 300,
+    Detail = 1000,
+}
+
+impl ArtSize {
+    const ALL: [Self; 3] = [Self::Small, Self::Grid, Self::Detail];
+
+    pub fn album_detail(pixels_per_point: f32) -> Self {
+        // A 300 px cover already looks sharp at the normal 168 pt Retina size.
+        if 168.0 * pixels_per_point > 360.0 {
+            Self::Detail
+        } else {
+            Self::Grid
+        }
+    }
+}
+
+type Key = (u64, ArtSize);
 
 enum Slot {
     Loading,
@@ -41,10 +63,10 @@ pub struct Artwork {
     runtime: Option<Runtime>,
     client: Option<Client>,
     permits: Arc<Semaphore>,
-    wanted: Arc<Mutex<HashMap<u64, Instant>>>,
-    slots: HashMap<u64, Slot>,
-    send: Sender<(u64, Loaded)>,
-    receive: Receiver<(u64, Loaded)>,
+    wanted: Arc<Mutex<HashMap<Key, Instant>>>,
+    slots: HashMap<Key, Slot>,
+    send: Sender<(Key, Loaded)>,
+    receive: Receiver<(Key, Loaded)>,
     frame: u64,
 }
 
@@ -80,11 +102,28 @@ impl Artwork {
     /// Call once per frame before drawing.
     pub fn begin_frame(&mut self) {
         self.frame += 1;
+        let mut uploaded = false;
         while let Ok((artwork, loaded)) = self.receive.try_recv() {
             match loaded {
                 Loaded::Image(image) => {
+                    uploaded = true;
+                    // Keep one resident copy per ID, including when concurrent sizes arrive out of order.
+                    if ArtSize::ALL.iter().any(|&size| {
+                        size > artwork.1
+                            && matches!(self.slots.get(&(artwork.0, size)), Some(Slot::Ready(..)))
+                    }) {
+                        self.slots.remove(&artwork);
+                        continue;
+                    }
+                    for size in ArtSize::ALL {
+                        let key = (artwork.0, size);
+                        if size < artwork.1 && matches!(self.slots.get(&key), Some(Slot::Ready(..)))
+                        {
+                            self.slots.remove(&key);
+                        }
+                    }
                     let texture = self.ctx.load_texture(
-                        format!("artwork-{artwork}"),
+                        format!("artwork-{}-{}", artwork.0, artwork.1 as u32),
                         image,
                         TextureOptions::LINEAR,
                     );
@@ -101,24 +140,39 @@ impl Artwork {
                 }
             }
         }
-        let ready = self
-            .slots
-            .values()
-            .filter(|s| matches!(s, Slot::Ready(..)))
-            .count();
-        if ready > MAX_TEXTURES {
-            let mut ages: Vec<(u64, u64)> = self
-                .slots
-                .iter()
-                .filter_map(|(id, slot)| match slot {
-                    Slot::Ready(_, used) if *used + 2 < self.frame => Some((*used, *id)),
-                    _ => None,
-                })
-                .collect();
-            ages.sort_unstable();
-            for (_, id) in ages.into_iter().take(ready - MAX_TEXTURES) {
-                self.slots.remove(&id);
+        if uploaded {
+            self.trim();
+        }
+    }
+
+    fn trim(&mut self) {
+        let mut count = 0;
+        let mut bytes = 0;
+        for slot in self.slots.values() {
+            if let Slot::Ready(texture, _) = slot {
+                count += 1;
+                bytes += texture.byte_size();
             }
+        }
+        if count <= MAX_TEXTURES && bytes <= TEXTURE_BUDGET {
+            return;
+        }
+        let mut ages: Vec<_> = self
+            .slots
+            .iter()
+            .filter_map(|(key, slot)| match slot {
+                Slot::Ready(texture, used) => Some((*used, *key, texture.byte_size())),
+                _ => None,
+            })
+            .collect();
+        ages.sort_unstable();
+        for (_, key, size) in ages {
+            if count <= MAX_TEXTURES && bytes <= TEXTURE_BUDGET {
+                break;
+            }
+            self.slots.remove(&key);
+            count -= 1;
+            bytes -= size;
         }
     }
 
@@ -126,44 +180,64 @@ impl Artwork {
     pub fn clear(&mut self) {
         self.slots.clear();
         self.wanted.lock().unwrap().clear();
+        // Old workers can only deliver to the discarded receiver.
+        self.wanted = Arc::default();
+        (self.send, self.receive) = channel();
     }
 
-    pub fn unavailable(&self, artwork: u64) -> bool {
+    pub fn unavailable(&self, artwork: u64, size: ArtSize) -> bool {
         matches!(
-            self.slots.get(&artwork),
+            self.slots.get(&(artwork, size)),
             Some(Slot::Missing | Slot::Failed(_))
         )
     }
 
-    pub fn size(&self, artwork: u64) -> Option<[usize; 2]> {
+    /// Reuse a larger cover immediately. During an upgrade keep showing the thumbnail.
+    pub fn get(
+        &mut self,
+        id: u64,
+        size: ArtSize,
+        library: &tagcast_player::account::Library,
+    ) -> Option<(egui::TextureId, [usize; 2])> {
+        if id == 0 {
+            return None;
+        }
+        let mut preview = None;
+        let mut pending = None;
+        for candidate in ArtSize::ALL.into_iter().rev() {
+            match self.slots.get_mut(&(id, candidate)) {
+                Some(Slot::Ready(texture, used)) => {
+                    *used = self.frame;
+                    let image = (texture.id(), texture.size());
+                    if candidate >= size {
+                        return Some(image);
+                    }
+                    preview = Some(image);
+                }
+                Some(Slot::Loading) if candidate >= size => pending = Some(candidate),
+                _ => {}
+            }
+        }
+        if let Some(candidate) = pending {
+            self.wanted
+                .lock()
+                .unwrap()
+                .insert((id, candidate), Instant::now());
+            return preview;
+        }
+        let artwork = (id, size);
         match self.slots.get(&artwork) {
-            Some(Slot::Ready(texture, _)) => Some(texture.size()),
-            _ => None,
+            Some(Slot::Missing) => return preview,
+            Some(Slot::Failed(at)) if at.elapsed() < RETRY => return preview,
+            _ => {}
         }
-    }
-
-    /// The cover texture, or `None` while it loads or when there is none.
-    pub fn get(&mut self, artwork: u64, url: Option<String>) -> Option<egui::TextureId> {
-        if artwork == 0 {
-            return None;
-        }
-        match self.slots.get_mut(&artwork) {
-            Some(Slot::Ready(texture, used)) => {
-                *used = self.frame;
-                return Some(texture.id());
-            }
-            Some(Slot::Missing) => return None,
-            Some(Slot::Failed(at)) if at.elapsed() < RETRY => return None,
-            Some(Slot::Failed(_)) => {}
-            Some(Slot::Loading) => {
-                self.wanted.lock().unwrap().insert(artwork, Instant::now());
-                return None;
-            }
-            None => {}
-        }
-        let (Some(url), Some(runtime), Some(client)) = (url, &self.runtime, &self.client) else {
+        let (Some(url), Some(runtime), Some(client)) = (
+            library.artwork_url(id, size as u32),
+            &self.runtime,
+            &self.client,
+        ) else {
             self.slots.insert(artwork, Slot::Missing);
-            return None;
+            return preview;
         };
         self.slots.insert(artwork, Slot::Loading);
         self.wanted.lock().unwrap().insert(artwork, Instant::now());
@@ -183,7 +257,7 @@ impl Artwork {
                         .get(&artwork)
                         .is_some_and(|t| t.elapsed() < STALE);
                     if fresh {
-                        fetch(&client, &url).await
+                        fetch(&client, &url, size).await
                     } else {
                         Loaded::Skipped
                     }
@@ -194,11 +268,11 @@ impl Artwork {
             let _ = send.send((artwork, loaded));
             ctx.request_repaint();
         });
-        None
+        preview
     }
 }
 
-async fn fetch(client: &Client, url: &str) -> Loaded {
+async fn fetch(client: &Client, url: &str, size: ArtSize) -> Loaded {
     let Ok(mut response) = client.get(url).send().await else {
         return Loaded::Failed;
     };
@@ -221,7 +295,7 @@ async fn fetch(client: &Client, url: &str) -> Loaded {
             Err(_) => return Loaded::Failed,
         }
     }
-    match decode(&body, 320) {
+    match decode(&body, size as u32) {
         Some(image) => Loaded::Image(image),
         None => Loaded::Missing,
     }
@@ -239,4 +313,46 @@ pub fn decode(bytes: &[u8], max: u32) -> Option<ColorImage> {
         [rgba.width() as usize, rgba.height() as usize],
         rgba.as_raw(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tagcast_player::account::Library;
+
+    fn deliver(art: &mut Artwork, id: u64, size: ArtSize, edge: usize) {
+        let img = ColorImage::filled([edge, edge], egui::Color32::WHITE);
+        art.send.send(((id, size), Loaded::Image(img))).unwrap();
+        art.begin_frame();
+    }
+
+    #[test]
+    fn upgrades_keep_the_preview_and_reuse_the_larger_image() {
+        let mut art = Artwork::new(egui::Context::default());
+        let library = Library::default();
+        deliver(&mut art, 1, ArtSize::Small, 150);
+        art.slots.insert((1, ArtSize::Grid), Slot::Loading);
+        assert_eq!(art.get(1, ArtSize::Grid, &library).unwrap().1, [150; 2]);
+        deliver(&mut art, 1, ArtSize::Grid, 300);
+        deliver(&mut art, 1, ArtSize::Small, 150);
+        assert_eq!(art.get(1, ArtSize::Small, &library).unwrap().1, [300; 2]);
+        assert_eq!(art.slots.len(), 1);
+    }
+
+    #[test]
+    fn clear_discards_old_deliveries_and_keeps_new_requests_independent() {
+        let mut art = Artwork::new(egui::Context::default());
+        let old = art.send.clone();
+        art.clear();
+        assert!(old.send(((1, ArtSize::Small), Loaded::Missing)).is_err());
+        deliver(&mut art, 1, ArtSize::Grid, 300);
+        assert!(!art.unavailable(1, ArtSize::Grid));
+    }
+
+    #[test]
+    fn detail_downloads_follow_the_display_resolution() {
+        assert_eq!(ArtSize::album_detail(1.0), ArtSize::Grid);
+        assert_eq!(ArtSize::album_detail(2.0), ArtSize::Grid);
+        assert_eq!(ArtSize::album_detail(3.0), ArtSize::Detail);
+    }
 }
