@@ -144,11 +144,16 @@ your own copy. Edit and preview its Light and Dark colours independently,
 then choose **Save and apply**. Theme settings are
 stored locally. See the [theme attributions](assets/themes/ATTRIBUTION.txt).
 
+Click the mini player icon beside the queue in the player bar for a compact window with
+cover art, track title, artist and playback controls. Click **Return to library** or press
+**Esc** to return to the same page while the music continues.
+
 ### Keyboard
 
 | Key | Action |
 | --- | --- |
 | Space | Play or pause |
+| ⌘⇧M | Switch between the library and mini player |
 | ← / → | Seek 10 seconds |
 | ⌘← / ⌘→ | Previous or next track |
 | ⌘↑ / ⌘↓ | Volume |
@@ -250,7 +255,7 @@ cargo run
 ```
 
 Every track then plays the given loopback file and covers load from
-`<art server>/artwork/<id>-300`. `TAGCAST_PLAYER_FIXTURE=signin` shows the
+`<art server>/artwork/<id>-150, -300 or -1000`. `TAGCAST_PLAYER_FIXTURE=signin` shows the
 sign-in screen with a sample code. Release builds leave all of this out.
 
 ## A note on AI usage

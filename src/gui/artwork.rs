@@ -104,6 +104,7 @@ impl Artwork {
         self.frame += 1;
         let mut uploaded = false;
         while let Ok((artwork, loaded)) = self.receive.try_recv() {
+            self.wanted.lock().unwrap().remove(&artwork);
             match loaded {
                 Loaded::Image(image) => {
                     uploaded = true;
@@ -264,7 +265,6 @@ impl Artwork {
                 }
                 Err(_) => Loaded::Skipped,
             };
-            wanted.lock().unwrap().remove(&artwork);
             let _ = send.send((artwork, loaded));
             ctx.request_repaint();
         });

@@ -5,6 +5,7 @@ mod artwork;
 mod catalog;
 mod listening;
 mod media;
+mod mini;
 mod queue;
 mod theme;
 mod views;
@@ -124,7 +125,7 @@ pub fn run(options: Options) -> std::result::Result<(), Box<dyn Error>> {
         .with_title(APP_NAME)
         .with_app_id(APP_ID)
         .with_inner_size([1200.0, 780.0])
-        .with_min_inner_size([820.0, 540.0])
+        .with_min_inner_size(mini::FULL_MIN)
         .with_fullsize_content_view(true)
         .with_titlebar_shown(false)
         .with_title_shown(false);
@@ -287,6 +288,7 @@ pub enum Action {
     ToggleGapless,
     RecoverOutput,
     ToggleQueuePanel,
+    ToggleMiniPlayer,
 }
 
 enum Message {
@@ -343,6 +345,7 @@ enum Stage {
 }
 
 pub struct App {
+    mini: mini::MiniPlayer,
     appearance: appearance::Preferences,
     settings_window: appearance::SettingsWindow,
     client_id: Option<String>,
@@ -425,6 +428,7 @@ impl App {
         });
         let (send, receive) = channel();
         let mut app = Self {
+            mini: mini::MiniPlayer::new(cc.storage),
             appearance,
             settings_window: appearance::SettingsWindow::default(),
             client_id: options.client_id,
@@ -672,6 +676,7 @@ impl App {
             .is_some_and(|old| old.library.owner != catalog.library.owner)
         {
             self.flush_listening();
+            self.art.clear();
             self.player.stop();
             self.queue.clear();
             self.ordered_album = false;
@@ -898,6 +903,7 @@ impl App {
             self.mark_listening();
         }
         match action {
+            Action::ToggleMiniPlayer => self.mini.toggle(&self.ctx),
             Action::Go(page) => self.go(page),
             Action::Back => self.back(),
             Action::Play {
@@ -1137,13 +1143,22 @@ impl App {
         let typing = ctx.egui_wants_keyboard_input();
         ctx.input_mut(|input| {
             let command = egui::Modifiers::COMMAND;
+            if input.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::M) {
+                actions.push(Action::ToggleMiniPlayer);
+            }
             if input.consume_key(command, Key::F) {
+                if self.mini.active() {
+                    actions.push(Action::ToggleMiniPlayer);
+                }
                 self.search_focus = true;
             }
             if input.consume_key(command, Key::Comma) {
+                if self.mini.active() {
+                    actions.push(Action::ToggleMiniPlayer);
+                }
                 actions.push(Action::OpenSettings);
             }
-            if input.pointer.button_pressed(egui::PointerButton::Extra1) {
+            if !self.mini.active() && input.pointer.button_pressed(egui::PointerButton::Extra1) {
                 actions.push(Action::Back);
             }
             if typing {
@@ -1173,7 +1188,11 @@ impl App {
                 self.settings.volume = (self.settings.volume - 0.05).max(0.0);
             }
             if input.consume_key(egui::Modifiers::NONE, Key::Escape) {
-                actions.push(Action::Back);
+                actions.push(if self.mini.active() {
+                    Action::ToggleMiniPlayer
+                } else {
+                    Action::Back
+                });
             }
             if input.consume_key(command, Key::R) {
                 actions.push(Action::Reload);
@@ -1296,6 +1315,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let colors = theme::colors(&ctx);
+        self.mini.update(&ctx);
         self.art.begin_frame();
         if let Stage::SignIn { .. } = self.stage {
             if let Some(action) = self.sign_in(ui) {
@@ -1343,6 +1363,24 @@ impl eframe::App for App {
         } else {
             TITLE_BAR
         };
+        if self.mini.active() {
+            egui::CentralPanel::default()
+                .frame(theme::panel(
+                    colors.bar,
+                    Margin {
+                        left: 14,
+                        right: 12,
+                        top: 8 + top,
+                        bottom: 8,
+                    },
+                ))
+                .show(ui, |ui| self.compact_player(ui, &mut actions));
+            self.toast(&ctx);
+            for action in actions {
+                self.apply(action);
+            }
+            return;
+        }
         egui::Panel::bottom("now-playing")
             .exact_size(86.0)
             .resizable(false)
@@ -1397,6 +1435,7 @@ impl eframe::App for App {
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "mini-return-window", &self.mini.library_window);
         eframe::set_value(storage, "settings", &self.settings);
         eframe::set_value(storage, "appearance", &self.appearance);
     }

@@ -277,6 +277,8 @@ pub enum Icon {
     Star(bool),
     Clock,
     Grid,
+    MiniPlayer,
+    ExpandPlayer,
     Microphone,
     Folder,
 }
@@ -289,6 +291,23 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color3
     let stroke = Stroke::new(1.7 * s.max(0.75), color);
     let fill = |points: Vec<Pos2>| Shape::convex_polygon(points, color, Stroke::NONE);
     match icon {
+        Icon::MiniPlayer | Icon::ExpandPlayer => {
+            painter.rect_stroke(
+                Rect::from_min_max(p(-8.0, -6.5), p(8.0, 6.5)),
+                1.5 * s,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            if icon == Icon::MiniPlayer {
+                painter.rect_filled(Rect::from_min_max(p(0.0, 0.0), p(6.0, 4.5)), 0.5 * s, color);
+            } else {
+                painter.line_segment([p(3.0, 3.0), p(-4.0, -3.0)], stroke);
+                painter.add(Shape::line(
+                    vec![p(-4.0, 1.5), p(-4.0, -3.0), p(0.5, -3.0)],
+                    stroke,
+                ));
+            }
+        }
         Icon::Play => {
             painter.add(fill(vec![p(-5.0, -7.5), p(7.5, 0.0), p(-5.0, 7.5)]));
         }
@@ -589,6 +608,10 @@ pub(super) fn focus_ring(ui: &Ui, response: &Response, rect: Rect, radius: Corne
 pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str) -> Response {
     let colors = colors(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    if !tip.is_empty() {
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), tip));
+    }
     if ui.is_rect_visible(rect) {
         let color = if !ui.is_enabled() {
             colors.faint

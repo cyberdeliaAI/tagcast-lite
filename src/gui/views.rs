@@ -1005,7 +1005,7 @@ impl App {
         Some(self.catalog.as_ref()?.album_of(track)?.id)
     }
 
-    fn now(&self) -> (Option<u64>, bool) {
+    pub(super) fn now(&self) -> (Option<u64>, bool) {
         let snapshot = self.player.output.snapshot();
         let playing = matches!(
             snapshot.phase,
@@ -2780,6 +2780,20 @@ impl App {
                 },
             );
         }
+        let mini_rect =
+            Rect::from_center_size(pos2(queue_rect.left() - 17.0, vy), Vec2::splat(30.0));
+        let mut mini_ui = ui.new_child(UiBuilder::new().max_rect(mini_rect));
+        if theme::icon_button(
+            &mut mini_ui,
+            Icon::MiniPlayer,
+            30.0,
+            colors.muted,
+            "Mini player",
+        )
+        .clicked()
+        {
+            actions.push(Action::ToggleMiniPlayer);
+        }
         let route = match snapshot.route {
             Some(Route::Hls(q)) => format!("{} · HLS", quality_label(q)),
             Some(Route::Direct(q)) => quality_label(q).to_owned(),
@@ -2790,7 +2804,7 @@ impl App {
                 ui.painter()
                     .layout_no_wrap(route.clone(), regular(Size::MICRO), colors.muted);
             let badge = Rect::from_min_size(
-                pos2(queue_rect.left() - 12.0 - galley.size().x - 14.0, vy - 10.0),
+                pos2(mini_rect.left() - 8.0 - galley.size().x - 14.0, vy - 10.0),
                 vec2(galley.size().x + 14.0, 20.0),
             );
             if badge.left() > right.left() {
