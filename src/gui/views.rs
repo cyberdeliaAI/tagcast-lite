@@ -1936,8 +1936,7 @@ impl App {
             theme::cover(ui.painter(), cover, texture, 10, &album.name);
             ui.add_space(14.0);
             ui.vertical(|ui| {
-                ui.set_min_height(168.0);
-                ui.add_space(24.0);
+                ui.spacing_mut().item_spacing.y = 3.0;
                 ui.label(
                     RichText::new("ALBUM")
                         .font(strong(Size::MICRO))
@@ -2000,7 +1999,9 @@ impl App {
                             });
                         });
                 }
-                ui.add_space(8.0);
+                // Align the controls with the cover's lower edge when the album details fit.
+                let space = cover.bottom() - theme::PILL_HEIGHT - ui.next_widget_position().y;
+                ui.add_space(space.max(4.0));
                 ui.horizontal(|ui| {
                     play_buttons(ui, &album.tracks, actions, false);
                     let saved = self
@@ -2013,7 +2014,8 @@ impl App {
                     } else {
                         (colors.muted, "Save local favourite")
                     };
-                    let star = theme::icon_button(ui, Icon::Star(saved), 34.0, color, tip);
+                    let star =
+                        theme::icon_button(ui, Icon::Star(saved), theme::PILL_HEIGHT, color, tip);
                     star.widget_info(|| {
                         egui::WidgetInfo::selected(egui::Role::Button, true, saved, tip)
                     });

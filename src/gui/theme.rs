@@ -684,6 +684,8 @@ pub fn icon_button(ui: &mut Ui, icon: Icon, size: f32, color: Color32, tip: &str
     }
 }
 
+pub const PILL_HEIGHT: f32 = 34.0;
+
 /// A pill-shaped button with an optional icon.
 pub fn pill(ui: &mut Ui, icon: Option<Icon>, text: &str, primary: bool) -> Response {
     let colors = colors(ui.ctx());
@@ -698,7 +700,7 @@ pub fn pill(ui: &mut Ui, icon: Option<Icon>, text: &str, primary: bool) -> Respo
         },
     );
     let icon_w = if icon.is_some() { 20.0 } else { 0.0 };
-    let size = vec2(galley.size().x + icon_w + 30.0, 34.0);
+    let size = vec2(galley.size().x + icon_w + 30.0, PILL_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered() && ui.is_enabled();
