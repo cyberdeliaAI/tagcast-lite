@@ -20,7 +20,7 @@ include the player and audio decoders. First-time sign-in opens in your browser.
 ## Download and install
 
 Choose a package from the [latest GitHub release](https://github.com/cyberdeliaAI/tagcast-lite/releases/latest).
-The release includes SHA-256 checksums for the four archives.
+The release includes SHA-256 checksums for the four archives. See the [changelog](CHANGELOG.md) for what’s new.
 
 | Platform | Requirements | Install and open |
 | --- | --- | --- |
