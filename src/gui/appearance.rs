@@ -189,7 +189,6 @@ pub struct SettingsState<'a> {
     pub library: Option<[usize; 3]>,
     pub output: Option<&'a str>,
     pub audio_error: Option<&'a str>,
-    pub logo: Option<&'a egui::TextureHandle>,
 }
 
 impl SettingsState<'_> {
@@ -868,10 +867,8 @@ fn about(ui: &mut Ui, state: &SettingsState<'_>, actions: &mut Vec<Action>) {
     let colors = theme::colors(ui.ctx());
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        if let Some(logo) = state.logo {
-            ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(64.0)));
-            ui.add_space(8.0);
-        }
+        theme::brand_mark(ui, 64.0, colors);
+        ui.add_space(8.0);
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 3.0;
             ui.label(
@@ -1105,6 +1102,16 @@ fn preview(ui: &mut Ui, colors: Colors) {
     painter.rect_filled(side, corner(10, 0, 0, 0), colors.sidebar);
     painter.rect_filled(bar, corner(0, 0, 10, 10), colors.bar);
 
+    let mark = Rect::from_min_size(side.min + vec2(9.0, 5.0), Vec2::splat(16.0));
+    theme::paint_brand_mark(&painter, mark, colors);
+    painter.text(
+        pos2(mark.right() + 5.0, mark.center().y),
+        Align2::LEFT_CENTER,
+        APP_NAME,
+        strong(10.0),
+        colors.text,
+    );
+
     for (index, (icon, label)) in [
         (Icon::Note, "Songs"),
         (Icon::Album, "Albums"),
@@ -1114,7 +1121,7 @@ fn preview(ui: &mut Ui, colors: Colors) {
     .enumerate()
     {
         let item = Rect::from_min_size(
-            pos2(side.left() + 8.0, side.top() + 10.0 + index as f32 * 24.0),
+            pos2(side.left() + 8.0, side.top() + 25.0 + index as f32 * 22.0),
             vec2(side.width() - 16.0, 21.0),
         );
         let selected = index == 1;
@@ -1272,7 +1279,6 @@ mod tests {
                     library: signed_in.then_some([1200, 90, 4]),
                     output: Some("Speakers"),
                     audio_error: None,
-                    logo: None,
                 },
             }
         }
@@ -1457,7 +1463,6 @@ mod tests {
             library: None,
             output: None,
             audio_error: None,
-            logo: None,
         };
         assert_eq!(state.active_quality(), Quality::K128);
         state.premium = true;

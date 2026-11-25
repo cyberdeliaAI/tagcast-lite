@@ -283,6 +283,53 @@ pub enum Icon {
     Folder,
 }
 
+/// The in-app vinyl mark uses the active palette, including unsaved editor previews.
+pub fn paint_brand_mark(painter: &egui::Painter, rect: Rect, colors: Colors) {
+    let edge = rect.width().min(rect.height());
+    let center = rect.center();
+    painter.rect_filled(rect, edge * 0.22, colors.accent);
+
+    let radius = edge * 0.412;
+    let vinyl = colors.accent.lerp_to_gamma(Color32::BLACK, 0.86);
+    let sheen = colors.accent.lerp_to_gamma(Color32::WHITE, 0.35);
+    painter.circle_filled(center, radius, vinyl);
+    // Two opposing reflections give the grooves the appearance of a pressed record.
+    for direction in [-1.0, 1.0] {
+        let point = |x, y| center + vec2(x, y) * (radius * direction);
+        painter.add(Shape::convex_polygon(
+            vec![
+                center,
+                point(-0.84, -0.54),
+                point(-0.69, -0.72),
+                point(-0.50, -0.86),
+            ],
+            vinyl.lerp_to_gamma(sheen, 0.21),
+            Stroke::NONE,
+        ));
+    }
+    for ring in [0.69, 0.88] {
+        painter.circle_stroke(
+            center,
+            radius * ring,
+            Stroke::new((edge * 0.016).max(0.5), vinyl.lerp_to_gamma(sheen, 0.57)),
+        );
+    }
+    painter.circle_filled(center, edge * 0.185, colors.accent);
+    paint_icon(
+        painter,
+        Rect::from_center_size(center, Vec2::splat(edge * 0.36)),
+        Icon::Play,
+        control_ink(colors.on_accent, colors.accent),
+    );
+}
+
+pub fn brand_mark(ui: &mut Ui, edge: f32, colors: Colors) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(edge), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        paint_brand_mark(ui.painter(), rect, colors);
+    }
+}
+
 /// Draws an icon centred in `rect`. Icons are designed on a 20-point grid.
 pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
     let s = rect.width().min(rect.height()) / 20.0;

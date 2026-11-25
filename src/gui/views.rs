@@ -1020,9 +1020,7 @@ impl App {
         let colors = theme::colors(ui.ctx());
         ui.horizontal(|ui| {
             ui.add_space(4.0);
-            if let Some(logo) = &self.logo {
-                ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(36.0)));
-            }
+            theme::brand_mark(ui, 36.0, colors);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 ui.label(

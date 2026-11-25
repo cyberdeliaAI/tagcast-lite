@@ -412,7 +412,6 @@ pub struct App {
     song_sort: (SongSort, bool),
     selected: Option<u64>,
     art: Artwork,
-    logo: Option<egui::TextureHandle>,
     ibroadcast_badge: Option<egui::TextureHandle>,
     /// A requested position, shown until playback reaches it.
     seeking: Option<(f64, Instant)>,
@@ -442,10 +441,6 @@ impl App {
         };
         output.set_volume(settings.gain());
         let player = Player::new(output).expect("could not start the audio decoder thread");
-        let logo = artwork::decode(include_bytes!("../../assets/icon-256.png"), 96).map(|image| {
-            cc.egui_ctx
-                .load_texture("logo", image, egui::TextureOptions::LINEAR)
-        });
         let ibroadcast_badge = artwork::decode(
             include_bytes!("../../assets/ibroadcast-dark-compact-powered.png"),
             339,
@@ -500,7 +495,6 @@ impl App {
             song_sort: (SongSort::Artist, false),
             selected: None,
             art: Artwork::new(cc.egui_ctx.clone()),
-            logo,
             ibroadcast_badge,
             seeking: None,
             title: String::new(),
@@ -1543,7 +1537,6 @@ impl App {
             }),
             output: self.player.output.device_name.as_deref(),
             audio_error: self.audio_error.as_deref(),
-            logo: self.logo.as_ref(),
         };
         self.settings_window
             .show(ctx, &mut self.appearance, state, actions);
@@ -1590,9 +1583,7 @@ impl App {
                         .show(ui, |ui| {
                             ui.set_width(card.x - 56.0);
                             ui.vertical_centered(|ui| {
-                                if let Some(logo) = &self.logo {
-                                    ui.add(egui::Image::new(logo).fit_to_exact_size(egui::Vec2::splat(64.0)));
-                                }
+                                theme::brand_mark(ui, 64.0, colors);
                                 ui.add_space(6.0);
                                 ui.label(RichText::new(APP_NAME).font(theme::strong(theme::Size::HEADING)).color(colors.text));
                                 ui.label(RichText::new("An independent player for your iBroadcast library").color(colors.muted));
