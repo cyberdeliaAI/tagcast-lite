@@ -33,7 +33,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const READ_TIMEOUT: Duration = Duration::from_secs(8);
 const LIBRARY_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const LIBRARY_LIMIT: usize = 192 * 1024 * 1024;
-const LIBRARY_FORMAT: u32 = 8;
+const LIBRARY_FORMAT: u32 = 9;
 const UPLOAD_METADATA_FORMAT: u32 = 4;
 const OLDEST_LIBRARY_FORMAT: u32 = 3;
 const ARTWORK_SERVER: &str = "https://artwork.ibroadcast.com";
@@ -794,6 +794,8 @@ pub struct Playlist {
     #[serde(default)]
     pub artwork: u64,
     pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
     pub tracks: Vec<u64>,
     pub folder: bool,
 }
@@ -1177,6 +1179,11 @@ impl Library {
                     result.playlists.push(Playlist {
                         id,
                         artwork: number(entry(row, playlists, "artwork_id")),
+                        description: entry(row, playlists, "description")
+                            .as_str()
+                            .unwrap_or_default()
+                            .trim()
+                            .to_owned(),
                         folder: entry(row, playlists, "type") == "folder"
                             && !truth(entry(row, playlists, "system_created")),
                         title: clean(entry(row, playlists, "name").as_str().unwrap_or("Playlist")),
@@ -1359,9 +1366,11 @@ mod tests {
                     "40": ["Invalid", 41, 72, "/128/../40", 4, false]
                 },
                 "playlists": {
-                    "map": {"name": 0, "tracks": 1, "artwork_id": 2},
-                    "55": ["Set", [10, "20", 10], "123"],
-                    "56": {"name": "Weekend", "tracks": [], "artwork_id": 456}
+                    "map": {"name": 0, "tracks": 1, "artwork_id": 2, "description": 3},
+                    "55": ["Set", [10, "20", 10], "123", " De beste muziek van eigen bodem "],
+                    "56": {"name": "Weekend", "tracks": [], "artwork_id": 456,
+                           "description": "Café\nB-kantjes"},
+                    "57": {"name": "Without description", "tracks": [], "description": "  \n"}
                 }
             }
         })).unwrap();
@@ -1374,6 +1383,12 @@ mod tests {
         assert_eq!(library.playlists[0].tracks, [10, 20, 10]);
         assert_eq!(library.playlists[0].artwork, 123);
         assert_eq!(library.playlists[1].artwork, 456);
+        assert_eq!(
+            library.playlists[0].description,
+            "De beste muziek van eigen bodem"
+        );
+        assert_eq!(library.playlists[1].description, "Café\nB-kantjes");
+        assert!(library.playlists[2].description.is_empty());
     }
 
     #[test]
@@ -1449,6 +1464,7 @@ mod tests {
         assert!(parsed.stamp().revision.is_empty());
         assert!(parsed.album_metadata.is_empty());
         assert_eq!(parsed.playlists[0].artwork, 0);
+        assert!(parsed.playlists[0].description.is_empty());
         assert_eq!(parsed.playlists[0].tracks, [20, 10]);
         assert!(!parsed.has_album_metadata());
         let mut v4 = current;

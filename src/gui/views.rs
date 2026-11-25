@@ -2160,20 +2160,43 @@ impl App {
             count(rows.len(), "song", "songs"),
             format_length(detail.seconds)
         );
-        let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
-        let cover = Rect::from_min_size(slot.min, Vec2::splat(slot.height()));
         let playlist = &catalog.library.playlists[index];
-        playlist_cover(
-            ui,
-            cover,
-            playlist.artwork,
-            &detail.covers,
-            &mut self.art,
-            catalog,
-        );
-        let header = Rect::from_min_max(pos2(cover.right() + 12.0, slot.top()), slot.max);
-        page_header_in(ui, header, &playlist.title, &subtitle, |ui| {
-            play_buttons_reversed(ui, rows, actions)
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
+            let (cover, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
+            playlist_cover(
+                ui,
+                cover,
+                playlist.artwork,
+                &detail.covers,
+                &mut self.art,
+                catalog,
+            );
+            ui.vertical(|ui| {
+                let height = if playlist.description.is_empty() {
+                    cover.height()
+                } else {
+                    HEADER
+                };
+                let (header, _) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+                page_header_in(ui, header, &playlist.title, &subtitle, |ui| {
+                    play_buttons_reversed(ui, rows, actions)
+                });
+                if !playlist.description.is_empty() {
+                    let muted = theme::colors(ui.ctx()).muted;
+                    egui::ScrollArea::vertical()
+                        .id_salt(("playlist-description", playlist.id))
+                        .auto_shrink([false, true])
+                        .max_height(84.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::Label::new(RichText::new(&playlist.description).color(muted))
+                                    .wrap(),
+                            );
+                        });
+                }
+            });
         });
         ui.add_space(12.0);
         if rows.is_empty() {
