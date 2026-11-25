@@ -2128,12 +2128,12 @@ impl App {
     fn playlist_page(&mut self, ui: &mut Ui, index: usize, actions: &mut Vec<Action>) {
         let now = self.now();
         let selected = self.selected;
-        let catalog = self.catalog.as_ref().unwrap();
-        let Some(playlist) = catalog.library.playlists.get(index) else {
-            centered_message(ui, false, "This playlist is no longer in your library", "");
-            return;
-        };
-        if playlist.folder {
+        let catalog = self.catalog.as_mut().unwrap();
+        let Some(detail) = catalog.playlist_detail(index) else {
+            let Some(playlist) = catalog.library.playlists.get(index) else {
+                centered_message(ui, false, "This playlist is no longer in your library", "");
+                return;
+            };
             page_header(ui, &playlist.title, "Playlist folder", |_| ());
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for child in &playlist.tracks {
@@ -2153,17 +2153,25 @@ impl App {
                 }
             });
             return;
-        }
-        let rows = catalog.playlist_tracks(index);
-        let seconds: f64 = rows.iter().map(|&i| catalog.track(i).seconds).sum();
+        };
+        let rows = &detail.tracks;
         let subtitle = format!(
             "{} · {}",
             count(rows.len(), "song", "songs"),
-            format_length(seconds)
+            format_length(detail.seconds)
         );
-        page_header(ui, &playlist.title, &subtitle, |ui| {
-            play_buttons_reversed(ui, &rows, actions)
-        });
+        let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
+        let cover = Rect::from_min_size(slot.min, Vec2::splat(slot.height()));
+        playlist_cover(ui, cover, &detail.covers, &mut self.art, catalog);
+        let header = Rect::from_min_max(pos2(cover.right() + 12.0, slot.top()), slot.max);
+        page_header_in(
+            ui,
+            header,
+            &catalog.library.playlists[index].title,
+            &subtitle,
+            |ui| play_buttons_reversed(ui, rows, actions),
+        );
+        ui.add_space(12.0);
         if rows.is_empty() {
             centered_message(ui, false, "This playlist is empty", "");
             return;
@@ -2180,7 +2188,7 @@ impl App {
             ui,
             "playlist",
             catalog,
-            &rows,
+            rows,
             &[],
             style,
             now,
@@ -2188,7 +2196,7 @@ impl App {
             None,
             &mut events,
         );
-        row_actions(catalog, &rows, events, &mut self.selected, None, actions);
+        row_actions(catalog, rows, events, &mut self.selected, None, actions);
     }
 
     fn queue_page(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
@@ -3118,6 +3126,60 @@ fn artist_card(
         .on_hover_text(format!("{} · {albums} · {songs}", artist.name))
         .on_hover_cursor(CursorIcon::PointingHand)
         .clicked()
+}
+
+/// Draw directly from the shared thumbnail textures. Each tile keeps its source aspect ratio.
+fn playlist_cover(ui: &Ui, rect: Rect, covers: &[u64], art: &mut Artwork, catalog: &Catalog) {
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let colors = theme::colors(ui.ctx());
+    let painter = ui.painter();
+    let mut tile = |area: Rect, id: Option<u64>| {
+        let (area, radius) = if covers.len() > 1 {
+            (area.shrink(0.5), 3)
+        } else {
+            (area, 6)
+        };
+        if let Some((texture, [w, h])) =
+            id.and_then(|id| art.get(id, ArtSize::Small, &catalog.library))
+        {
+            let pixels = vec2(w as f32, h as f32);
+            let scale = (area.width() / pixels.x).max(area.height() / pixels.y);
+            let uv = Rect::from_center_size(pos2(0.5, 0.5), area.size() / (pixels * scale));
+            painter.add(
+                egui::epaint::RectShape::filled(area, radius, Color32::WHITE)
+                    .with_texture(texture, uv),
+            );
+        } else {
+            painter.rect_filled(area, radius, colors.surface);
+            let icon =
+                Rect::from_center_size(area.center(), Vec2::splat(area.size().min_elem() * 0.44));
+            paint_icon(painter, icon, Icon::Playlist, colors.muted);
+        }
+    };
+    let (left, right) = rect.split_left_right_at_fraction(0.5);
+    let (top_left, bottom_left) = left.split_top_bottom_at_fraction(0.5);
+    let (top_right, bottom_right) = right.split_top_bottom_at_fraction(0.5);
+    match covers {
+        [] => tile(rect, None),
+        [one] => tile(rect, Some(*one)),
+        [a, b] => {
+            tile(left, Some(*a));
+            tile(right, Some(*b));
+        }
+        [a, b, c] => {
+            tile(left, Some(*a));
+            tile(top_right, Some(*b));
+            tile(bottom_right, Some(*c));
+        }
+        [a, b, c, d, ..] => {
+            tile(top_left, Some(*a));
+            tile(top_right, Some(*b));
+            tile(bottom_left, Some(*c));
+            tile(bottom_right, Some(*d));
+        }
+    }
 }
 
 fn artist_picture(

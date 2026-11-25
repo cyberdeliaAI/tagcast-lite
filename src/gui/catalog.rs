@@ -256,11 +256,19 @@ pub enum SongSort {
     Time,
 }
 
+pub struct PlaylistDetail {
+    index: usize,
+    pub tracks: Vec<usize>,
+    pub seconds: f64,
+    pub covers: Vec<u64>,
+}
+
 pub struct Catalog {
     pub library: Library,
     pub by_id: HashMap<u64, usize>,
     playlists_by_id: HashMap<u64, usize>,
     pub playlist_count: usize,
+    open_playlist: Option<Arc<PlaylistDetail>>,
     groups: HashMap<BrowseKind, Vec<GroupSummary>>,
     pub albums: Vec<Album>,
     pub album_index: HashMap<u64, usize>,
@@ -521,6 +529,7 @@ impl Catalog {
             by_id,
             playlists_by_id,
             playlist_count,
+            open_playlist: None,
             groups: HashMap::new(),
             albums,
             album_index,
@@ -685,17 +694,41 @@ impl Catalog {
         self.artist_counts[role as usize]
     }
 
-    pub fn playlist_tracks(&self, playlist: usize) -> Vec<usize> {
-        self.library
-            .playlists
-            .get(playlist)
-            .map(|p| {
-                p.tracks
-                    .iter()
-                    .filter_map(|id| self.by_id.get(id).copied())
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// Resolve only the open playlist. Replacing the library also drops this cache.
+    pub fn playlist_detail(&mut self, index: usize) -> Option<Arc<PlaylistDetail>> {
+        if let Some(detail) = &self.open_playlist
+            && detail.index == index
+        {
+            return Some(Arc::clone(detail));
+        }
+        let playlist = self.library.playlists.get(index)?;
+        if playlist.folder {
+            return None;
+        }
+        let mut detail = PlaylistDetail {
+            index,
+            tracks: Vec::with_capacity(playlist.tracks.len()),
+            seconds: 0.0,
+            covers: Vec::with_capacity(4),
+        };
+        for &id in &playlist.tracks {
+            let Some(row) = self.track_index(id) else {
+                continue;
+            };
+            let track = self.track(row);
+            detail.tracks.push(row);
+            detail.seconds += track.seconds;
+            if detail.covers.len() < 4
+                && let Some(album) = self.album_of(track)
+                && album.artwork != 0
+                && !detail.covers.contains(&album.artwork)
+            {
+                detail.covers.push(album.artwork);
+            }
+        }
+        let detail = Arc::new(detail);
+        self.open_playlist = Some(Arc::clone(&detail));
+        Some(detail)
     }
 
     pub fn reshuffle_albums(&mut self) {
@@ -954,6 +987,39 @@ mod tests {
         let catalog = Catalog::new(Library::parse(&data).unwrap());
         assert_eq!(catalog.playlist_count, 1);
         assert!(catalog.playlist_index(12).is_some());
+    }
+
+    #[test]
+    fn playlist_cover_selection_is_lazy_bounded_and_follows_the_resolved_album() {
+        let mut data = two_discs();
+        // Both discs have different track artwork but share the album's cover (12).
+        for (id, artwork) in [(31, 0), (32, 12), (33, 33), (34, 34), (35, 35), (36, 36)] {
+            data["library"]["albums"][id.to_string()] = json!({"name": id.to_string()});
+            data["library"]["tracks"][id.to_string()] = json!({
+                "title": id.to_string(), "album_id": id, "artwork_id": artwork,
+                "file": format!("/128/{id}"), "length": 10
+            });
+        }
+        data["library"]["playlists"] = json!({
+            "1": {"name": "Mix", "tracks": [99, 31, 201, 32, 101, 33, 33, 34, 35, 36]},
+            "2": {"name": "No art", "tracks": [31]},
+            "3": {"name": "Folder", "type": "folder", "tracks": [1, 2]}
+        });
+        let mut catalog = Catalog::new(Library::parse(&data).unwrap());
+        let mix = catalog.playlist_index(1).unwrap();
+        let no_art = catalog.playlist_index(2).unwrap();
+        let folder = catalog.playlist_index(3).unwrap();
+        assert!(catalog.open_playlist.is_none());
+        assert!(catalog.playlist_detail(folder).is_none());
+        assert!(catalog.open_playlist.is_none());
+        let detail = catalog.playlist_detail(mix).unwrap();
+        assert_eq!(detail.covers, [12, 33, 34, 35]);
+        let ids: Vec<_> = detail.tracks.iter().map(|&i| catalog.track(i).id).collect();
+        assert_eq!(ids, [31, 201, 32, 101, 33, 33, 34, 35, 36]);
+        assert_eq!(detail.seconds, 70.0);
+        assert!(Arc::ptr_eq(&detail, &catalog.playlist_detail(mix).unwrap()));
+        assert!(catalog.playlist_detail(no_art).unwrap().covers.is_empty());
+        assert_eq!(Arc::strong_count(&detail), 1);
     }
 
     #[test]
