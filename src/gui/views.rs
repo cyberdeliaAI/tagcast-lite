@@ -1210,7 +1210,9 @@ impl App {
             ui.spacing_mut().item_spacing.x = 5.0;
             self.show_ibroadcast_badge(ui, 92.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let tip = if cfg!(target_os = "macos") {
+                let tip = if self.updates.available().is_some() {
+                    "Update available · Open Settings"
+                } else if cfg!(target_os = "macos") {
                     "Settings (⌘,)"
                 } else {
                     "Settings (Ctrl+,)"
@@ -1219,8 +1221,20 @@ impl App {
                 settings.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Settings")
                 });
+                let update_available = self.updates.available().is_some();
+                if update_available {
+                    ui.painter().circle_filled(
+                        settings.rect.right_top() + vec2(-4.0, 4.0),
+                        3.0,
+                        colors.accent_text,
+                    );
+                }
                 if settings.clicked() {
-                    actions.push(Action::OpenSettings);
+                    actions.push(if update_available {
+                        Action::OpenUpdates
+                    } else {
+                        Action::OpenSettings
+                    });
                 }
                 if self.loading.is_some() {
                     ui.label(
@@ -1433,37 +1447,58 @@ impl App {
         });
     }
 
-    pub(super) fn queue_preview(&self, ui: &mut Ui, actions: &mut Vec<Action>) {
+    pub(super) fn queue_preview(&mut self, ui: &mut Ui, actions: &mut Vec<Action>) {
+        let mut resumed = false;
         ui.horizontal(|ui| {
             ui.heading("Up next");
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui.button("Close").clicked() {
                     actions.push(Action::ToggleQueuePanel);
                 }
+                if self.preview_scroll.browsing {
+                    let color = theme::colors(ui.ctx()).accent_text;
+                    resumed = theme::icon_button(ui, Icon::Bars, 25.0, color, "Jump to current")
+                        .clicked();
+                }
             });
         });
-        let from = self.queue.current.unwrap_or(0);
+        if resumed {
+            self.preview_scroll.resume();
+        }
+        let current = self.queue.current.unwrap_or(0);
+        let row_height = 22.0 + ui.spacing().item_spacing.y;
+        let previous = self.preview_scroll.current.unwrap_or(current);
+        self.preview_scroll
+            .input(ui, self.queue.len().saturating_sub(previous), row_height);
+        let from = if self.preview_scroll.browsing {
+            previous
+        } else {
+            current
+        };
+        self.preview_scroll.current = Some(from);
         let rows = &self.queue.items[from.min(self.queue.items.len())..];
         if rows.is_empty() {
             ui.label("The queue is empty");
             return;
         }
-        egui::ScrollArea::vertical()
-            .id_salt("queue-preview-rows")
-            .show_rows(ui, 22.0, rows.len(), |ui, visible| {
-                for index in visible {
-                    let row = &rows[index];
-                    let label = egui::Label::new(&row.track.title)
-                        .truncate()
-                        .sense(Sense::click());
-                    let response = ui
-                        .add(label)
-                        .on_hover_text(format!("{} · {}", row.track.artist, row.track.title));
-                    if response.double_clicked() {
-                        actions.push(Action::QueueJump(from + index));
-                    }
+        let mut scroll = egui::ScrollArea::vertical().id_salt("queue-preview-rows");
+        if !self.preview_scroll.browsing {
+            scroll = scroll.vertical_scroll_offset(0.0);
+        }
+        scroll.show_rows(ui, 22.0, rows.len(), |ui, visible| {
+            for index in visible {
+                let row = &rows[index];
+                let label = egui::Label::new(&row.track.title)
+                    .truncate()
+                    .sense(Sense::click());
+                let response = ui
+                    .add(label)
+                    .on_hover_text(format!("{} · {}", row.track.artist, row.track.title));
+                if response.double_clicked() {
+                    actions.push(Action::QueueJump(from + index));
                 }
-            });
+            }
+        });
     }
 
     fn collection_page(&mut self, ui: &mut Ui, group: Collection, actions: &mut Vec<Action>) {
@@ -2173,6 +2208,12 @@ impl App {
             .current
             .map_or(self.queue.len(), |c| self.queue.len() - c - 1);
         page_header(ui, "Queue", &subtitle, |ui| {
+            if self.queue_scroll.browsing
+                && self.queue.current.is_some()
+                && theme::pill(ui, None, "Jump to current", false).clicked()
+            {
+                self.queue_scroll.resume();
+            }
             ui.add_enabled_ui(upcoming > 0, |ui| {
                 if theme::pill(ui, None, "Clear upcoming", false).clicked() {
                     actions.push(Action::QueueClear);
@@ -2205,14 +2246,14 @@ impl App {
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("queue")
             .auto_shrink([false, false]);
-        if let Some(current) = current
-            && ui.memory(|m| m.data.get_temp::<usize>(Id::unique("queue-scrolled")))
-                != Some(current)
+        self.queue_scroll.input(ui, items.len(), ROW);
+        if let Some(offset) = self
+            .queue_scroll
+            .follow(current, ui.available_height(), ROW)
         {
-            scroll = scroll.vertical_scroll_offset((current as f32 * ROW - ROW * 2.0).max(0.0));
-            ui.memory_mut(|m| m.data.insert_temp(Id::unique("queue-scrolled"), current));
+            scroll = scroll.vertical_scroll_offset(offset);
         }
-        ui.scope(|ui| {
+        let drawn = ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             scroll.show_rows(ui, ROW, items.len(), |ui, range| {
                 for row in range {
@@ -2238,8 +2279,9 @@ impl App {
                     );
                 }
                 ui.add_space(24.0);
-            });
+            })
         });
+        self.queue_scroll.offset = drawn.inner.state.clamped_offset().y;
         for event in events {
             match event {
                 RowEvent::Play(row) => actions.push(Action::QueueJump(row)),

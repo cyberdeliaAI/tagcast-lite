@@ -130,6 +130,9 @@ locally saved favourites, queue and listening history.
 
 Volume, quality, shuffle, repeat, album and artist sort, and the window size are remembered.
 
+In **Queue**, the current song stays in view until you scroll. Choose **Jump to current**
+to follow playback again. The **Up next** panel has its own follow control.
+
 ### Settings
 
 Click the gear next to your plan at the bottom of the sidebar to open Settings.
@@ -147,6 +150,21 @@ stored locally. See the [theme attributions](assets/themes/ATTRIBUTION.txt).
 Click the mini player icon beside the queue in the player bar for a compact window with
 cover art, track title, artist and playback controls. Click **Return to library** or press
 **Esc** to return to the same page while the music continues.
+
+### Updating
+
+Open **Settings → About → Updates** to check for a stable release. Automatic checks use
+GitHub once a day and can be turned off. A dot on the settings gear opens the available
+update. Select **Download update** to prepare it while music plays, then **Install and
+restart** when you are ready to interrupt playback. Closing the app discards a staged
+direct download. Homebrew manages its own download cache.
+
+On macOS, a standalone bundle verifies the release archive, the Tagcast Lite Developer ID
+and the notarized app before swapping bundles. A Homebrew installation uses its existing
+cask to refresh, fetch and upgrade from within Settings. The tap must offer the same
+version and SHA-256 as the GitHub release. For the Windows and Linux portable packages,
+the updater verifies the GitHub asset digest and replaces the player executable in its
+writable installation folder. Source checkouts can use Git to update.
 
 ### Keyboard
 

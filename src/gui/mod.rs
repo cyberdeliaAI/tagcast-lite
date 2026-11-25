@@ -7,7 +7,9 @@ mod listening;
 mod media;
 mod mini;
 mod queue;
+mod queue_scroll;
 mod theme;
+mod updates;
 mod views;
 
 use std::{
@@ -18,6 +20,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
+        atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, Sender, channel},
     },
     thread,
@@ -149,11 +152,24 @@ pub fn run(options: Options) -> std::result::Result<(), Box<dyn Error>> {
         persistence_path,
         ..Default::default()
     };
+    let restart = Arc::new(AtomicBool::new(false));
+    let requested = Arc::clone(&restart);
+    let executable = std::env::current_exe();
     eframe::run_native(
         APP_NAME,
         native,
-        Box::new(move |cc| Ok(Box::new(App::new(cc, options)))),
+        Box::new(move |cc| Ok(Box::new(App::new(cc, options, requested)))),
     )?;
+    if restart.load(Ordering::Acquire) {
+        let mut command = std::process::Command::new(executable?);
+        command
+            .args(
+                std::env::args_os()
+                    .skip(1)
+                    .filter(|a| !a.to_string_lossy().starts_with("-psn_")),
+            )
+            .spawn()?;
+    }
     Ok(())
 }
 
@@ -179,6 +195,7 @@ struct Settings {
     track_artist_sort: ArtistSort,
     gapless: bool,
     queue_panel: bool,
+    automatic_updates: bool,
 }
 
 impl Default for Settings {
@@ -195,6 +212,7 @@ impl Default for Settings {
             track_artist_sort: ArtistSort::default(),
             gapless: false,
             queue_panel: false,
+            automatic_updates: true,
         }
     }
 }
@@ -289,6 +307,11 @@ pub enum Action {
     RecoverOutput,
     ToggleQueuePanel,
     ToggleMiniPlayer,
+    OpenUpdates,
+    CheckUpdates,
+    SetAutomaticUpdates(bool),
+    DownloadUpdate,
+    InstallUpdate,
 }
 
 enum Message {
@@ -345,6 +368,9 @@ enum Stage {
 }
 
 pub struct App {
+    updates: updates::Updates,
+    restart: Arc<AtomicBool>,
+    fixture: bool,
     mini: mini::MiniPlayer,
     appearance: appearance::Preferences,
     settings_window: appearance::SettingsWindow,
@@ -363,6 +389,8 @@ pub struct App {
     _stream: Option<cpal::Stream>,
     audio_error: Option<String>,
     queue: Queue,
+    queue_scroll: queue_scroll::QueueScroll,
+    preview_scroll: queue_scroll::QueueScroll,
     listening: listening::Listening,
     listening_owner: String,
     listening_writer: listening::Writer,
@@ -393,7 +421,7 @@ pub struct App {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext<'_>, options: Options) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, options: Options, restart: Arc<AtomicBool>) -> Self {
         theme::install(&cc.egui_ctx);
         let appearance: appearance::Preferences = cc
             .storage
@@ -428,6 +456,9 @@ impl App {
         });
         let (send, receive) = channel();
         let mut app = Self {
+            updates: updates::Updates::new(cc.storage),
+            restart,
+            fixture: false,
             mini: mini::MiniPlayer::new(cc.storage),
             appearance,
             settings_window: appearance::SettingsWindow::default(),
@@ -446,6 +477,8 @@ impl App {
             _stream: stream,
             audio_error,
             queue: Queue::default(),
+            queue_scroll: Default::default(),
+            preview_scroll: Default::default(),
             listening: listening::Listening::default(),
             listening_owner: String::new(),
             listening_writer: listening::Writer::new(),
@@ -475,6 +508,7 @@ impl App {
         };
         #[cfg(debug_assertions)]
         if app.open_fixture() {
+            app.fixture = true;
             return app;
         }
         app.connect();
@@ -610,6 +644,8 @@ impl App {
         }
         self.player.stop();
         self.queue.clear();
+        self.queue_scroll.resume();
+        self.preview_scroll.resume();
         self.ordered_album = false;
         self.catalog = None;
         self.source = None;
@@ -679,6 +715,8 @@ impl App {
             self.art.clear();
             self.player.stop();
             self.queue.clear();
+            self.queue_scroll.resume();
+            self.preview_scroll.resume();
             self.ordered_album = false;
             self.browse = Browse::default();
             self.artist_browsers = Default::default();
@@ -922,6 +960,8 @@ impl App {
                             .is_some_and(|album| album.tracks == tracks)
                     });
                 let tracks = self.tracks(&tracks);
+                self.queue_scroll.resume();
+                self.preview_scroll.resume();
                 if self
                     .queue
                     .replace(tracks, start, self.settings.shuffle)
@@ -933,6 +973,10 @@ impl App {
             Action::Enqueue { tracks, next } => {
                 let n = tracks.len();
                 let was_empty = self.queue.is_empty();
+                if was_empty {
+                    self.queue_scroll.resume();
+                    self.preview_scroll.resume();
+                }
                 let tracks = self.tracks(&tracks);
                 self.queue.add(tracks, next);
                 if was_empty && self.queue.jump(0).is_some() {
@@ -993,6 +1037,11 @@ impl App {
                     self.notify(format!("Streaming quality: {}", quality_label(quality)));
                 }
             }
+            Action::OpenUpdates => self.settings_window.open(appearance::Section::About),
+            Action::SetAutomaticUpdates(enabled) => self.settings.automatic_updates = enabled,
+            Action::CheckUpdates => self.updates.check(&self.ctx),
+            Action::DownloadUpdate => self.updates.prepare(&self.ctx),
+            Action::InstallUpdate => self.updates.install(&self.ctx),
             Action::OpenSettings => {
                 self.settings_window.open(appearance::Section::Playback);
                 self.ctx.request_repaint();
@@ -1217,6 +1266,24 @@ impl Drop for App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self
+            .updates
+            .poll(ctx, self.settings.automatic_updates && !self.fixture)
+        {
+            self.restart.store(true, Ordering::Release);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if self.updates.quit_download.is_cancelled()
+            && self.updates.phase != updates::Phase::Downloading
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        } else if ctx.input(|i| i.viewport().close_requested()) {
+            if self.updates.phase == updates::Phase::Downloading {
+                self.updates.quit_download.cancel();
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            } else if self.updates.phase == updates::Phase::Installing {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+        }
         while let Ok((generation, message)) = self.receive.try_recv() {
             self.handle(generation, message);
         }
@@ -1436,6 +1503,7 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "mini-return-window", &self.mini.library_window);
+        eframe::set_value(storage, "update-cache", &self.updates.cache);
         eframe::set_value(storage, "settings", &self.settings);
         eframe::set_value(storage, "appearance", &self.appearance);
     }
@@ -1455,6 +1523,8 @@ enum SignInAction {
 impl App {
     fn show_settings(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         let state = appearance::SettingsState {
+            updates: Some(&self.updates),
+            automatic_updates: self.settings.automatic_updates,
             quality: self.settings.quality(),
             premium: self
                 .catalog

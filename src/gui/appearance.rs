@@ -177,6 +177,8 @@ impl Section {
 }
 
 pub struct SettingsState<'a> {
+    pub updates: Option<&'a super::updates::Updates>,
+    pub automatic_updates: bool,
     pub quality: Quality,
     pub premium: bool,
     pub gapless: bool,
@@ -388,7 +390,7 @@ impl SettingsWindow {
                         Section::Appearance => changed |= self.appearance(ui, preferences),
                         Section::Account => closed |= self.account(ui, state, actions),
                         Section::Shortcuts => shortcuts(ui),
-                        Section::About => about(ui, state),
+                        Section::About => about(ui, state, actions),
                     }
                 }
                 ui.add_space(18.0);
@@ -862,7 +864,7 @@ fn shortcuts(ui: &mut Ui) {
     );
 }
 
-fn about(ui: &mut Ui, state: &SettingsState<'_>) {
+fn about(ui: &mut Ui, state: &SettingsState<'_>, actions: &mut Vec<Action>) {
     let colors = theme::colors(ui.ctx());
     ui.add_space(4.0);
     ui.horizontal(|ui| {
@@ -890,6 +892,74 @@ fn about(ui: &mut Ui, state: &SettingsState<'_>) {
         });
     });
     ui.add_space(18.0);
+    if let Some(updates) = state.updates {
+        use super::updates::Phase;
+        card(ui, |ui| {
+            ui.heading("Updates");
+            let mut automatic = state.automatic_updates;
+            if ui
+                .checkbox(&mut automatic, "Check automatically once a day")
+                .changed()
+            {
+                actions.push(Action::SetAutomaticUpdates(automatic));
+            }
+            if let Some(release) = updates.available() {
+                ui.label(format!("Version {} is available", release.version));
+                if !release.notes.is_empty() {
+                    ui.collapsing("Release notes", |ui| {
+                        ui.label(&release.notes);
+                    });
+                }
+            }
+            if let Some(error) = &updates.error {
+                ui.colored_label(colors.warn, error);
+            }
+            match updates.phase {
+                Phase::Checking | Phase::Downloading | Phase::Installing => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(match updates.phase {
+                            Phase::Checking => "Checking GitHub…",
+                            Phase::Downloading => "Downloading and verifying the update…",
+                            _ => "Installing the update…",
+                        });
+                    });
+                }
+                Phase::Ready => {
+                    ui.label(if updates.ready_with_brew() {
+                        "Homebrew has downloaded the update."
+                    } else {
+                        "The verified update is ready."
+                    });
+                    ui.label("Installing will stop playback and restart Tagcast Lite.");
+                    if ui.button("Install and restart").clicked() {
+                        actions.push(Action::InstallUpdate);
+                    }
+                }
+                Phase::Idle => {
+                    if updates.error.is_none() && updates.checked() && updates.available().is_none()
+                    {
+                        ui.label("You’re running the latest version.");
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if updates.downloadable() && ui.button("Download update").clicked() {
+                            actions.push(Action::DownloadUpdate);
+                        }
+                        if ui.button("Check now").clicked() {
+                            actions.push(Action::CheckUpdates);
+                        }
+                    });
+                    if updates.available().is_some() && !updates.downloadable() {
+                        ui.hyperlink_to(
+                            "View release downloads",
+                            format!("{REPOSITORY}/releases/latest"),
+                        );
+                    }
+                }
+            }
+        });
+        ui.add_space(12.0);
+    }
     card(ui, |ui| {
         let detail = ("github.com/cyberdeliaAI/tagcast-lite", colors.muted);
         row(ui, "Source code and releases", Some(detail), |ui| {
@@ -1191,6 +1261,8 @@ mod tests {
                 window,
                 preferences,
                 state: SettingsState {
+                    updates: None,
+                    automatic_updates: true,
                     quality: Quality::Original,
                     premium: true,
                     gapless: false,
@@ -1374,6 +1446,8 @@ mod tests {
     #[test]
     fn free_accounts_show_128_kbps_even_with_a_saved_premium_quality() {
         let mut state = SettingsState {
+            updates: None,
+            automatic_updates: true,
             quality: Quality::Original,
             premium: false,
             gapless: false,
