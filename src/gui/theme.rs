@@ -279,6 +279,8 @@ pub enum Icon {
     Grid,
     MiniPlayer,
     ExpandPlayer,
+    /// A push pin, filled while it holds something in place.
+    Pin(bool),
     Microphone,
     Folder,
 }
@@ -354,6 +356,39 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color3
                     stroke,
                 ));
             }
+        }
+        Icon::Pin(pinned) => {
+            // A push pin leaning to the right, its needle towards the lower left.
+            let (sin, cos) = 40f32.to_radians().sin_cos();
+            let q = |x: f32, y: f32| p(x * cos - y * sin, x * sin + y * cos + 1.0);
+            let parts = [
+                [(-4.2, -9.2), (4.2, -9.2), (4.2, -6.4), (-4.2, -6.4)],
+                [(-2.5, -6.4), (2.5, -6.4), (2.5, -2.6), (-2.5, -2.6)],
+                [(-5.6, -2.6), (5.6, -2.6), (5.6, -0.8), (-5.6, -0.8)],
+            ];
+            if pinned {
+                for part in parts {
+                    painter.add(fill(part.iter().map(|&(x, y)| q(x, y)).collect()));
+                }
+            } else {
+                let outline = [
+                    (-4.2, -9.2),
+                    (4.2, -9.2),
+                    (4.2, -6.4),
+                    (2.5, -6.4),
+                    (2.5, -2.6),
+                    (5.6, -2.6),
+                    (5.6, -0.8),
+                    (-5.6, -0.8),
+                    (-5.6, -2.6),
+                    (-2.5, -2.6),
+                    (-2.5, -6.4),
+                    (-4.2, -6.4),
+                ];
+                let points = outline.iter().map(|&(x, y)| q(x, y)).collect();
+                painter.add(Shape::closed_line(points, Stroke::new(1.4 * s, color)));
+            }
+            painter.line_segment([q(0.0, -0.8), q(0.0, 8.6)], stroke);
         }
         Icon::Play => {
             painter.add(fill(vec![p(-5.0, -7.5), p(7.5, 0.0), p(-5.0, 7.5)]));
