@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- **Windows startup.** Double-clicking `tagcast-player.exe` now opens just the player window. Command-line options such as `--version` still work.
+- **Mini player.** See the album alongside the artist and a larger cover. Click or drag the position bar to seek, with elapsed and total time shown. Use the pin to keep the mini player on top. Lite remembers your choice.
+- **Playlists.** The song count and total playing time now appear beneath the playback buttons. Each playlist and playlist folder remembers its own scroll position.
+- **Navigation.** The back arrow now sits beside the page heading. Sort controls, album grids and track lists stay aligned as you move between pages.
+- **Updates.** Settings → About → Updates shows the last successful check and the next available action. You can read the release notes there before downloading an update.
+
 ## 0.3.10
 
 - **Mini player.** Click the mini player icon beside the queue to keep the cover, track title and playback controls in a compact window. Press Esc to return to the same library page while the music continues.
