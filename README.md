@@ -48,36 +48,34 @@ The cask is maintained in the [Cyberdelia Homebrew tap](https://github.com/cyber
 
 ## Screenshots
 
-These screenshots show the library in v0.3.6, before the sidebar settings gear was added.
+![Album covers in random order with the library sidebar and playback controls](docs/screenshots/albums.jpg)
 
-![Albums with cover art, the compact sidebar and playback controls](docs/screenshots/albums.jpg)
+### Mini player
+
+<img src="docs/screenshots/mini-player.png" width="420" alt="Mini player showing Extra by Ken Ishii, with a seek bar and pin control">
 
 <details>
-<summary>More screenshots</summary>
-
-### Songs
-
-![The sortable Songs view](docs/screenshots/songs.jpg)
+<summary>More screenshots from v0.4.0</summary>
 
 ### Album
 
-![Album details, cover art and track list](docs/screenshots/album.jpg)
-
-### Album artist
-
-![An album artist's catalogue](docs/screenshots/album-artist.jpg)
-
-### Years
-
-![Browse years with album and track counts](docs/screenshots/years.jpg)
-
-### Genre
-
-![Albums from a genre in random order](docs/screenshots/genre.jpg)
+![Jelly Tones by Ken Ishii with its Electro genre and eight tracks](docs/screenshots/album.jpg)
 
 ### Playlist
 
-![A playlist with the current track highlighted](docs/screenshots/playlist.jpg)
+![Jared Hess Soundtrack playlist with its cover, description, song count and playing time](docs/screenshots/playlist.jpg)
+
+### Browse by genre
+
+![Genres sorted by track count, with album and track totals for each genre](docs/screenshots/genres.jpg)
+
+### Appearance
+
+![Appearance settings with the Apple Music Classic theme selected](docs/screenshots/appearance.jpg)
+
+### About and updates
+
+![About settings showing version 0.4.0 and the automatic update check](docs/screenshots/updates.jpg)
 
 </details>
 
