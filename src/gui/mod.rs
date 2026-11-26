@@ -307,6 +307,7 @@ pub enum Action {
     RecoverOutput,
     ToggleQueuePanel,
     ToggleMiniPlayer,
+    ToggleMiniOnTop,
     OpenUpdates,
     CheckUpdates,
     SetAutomaticUpdates(bool),
@@ -936,6 +937,10 @@ impl App {
         }
         match action {
             Action::ToggleMiniPlayer => self.mini.toggle(&self.ctx),
+            Action::ToggleMiniOnTop => {
+                let on_top = !self.mini.on_top;
+                self.mini.set_on_top(&self.ctx, on_top);
+            }
             Action::Go(page) => self.go(page),
             Action::Back => self.back(),
             Action::Play {
@@ -1432,7 +1437,7 @@ impl eframe::App for App {
                         left: 14,
                         right: 12,
                         top: 8 + top,
-                        bottom: 8,
+                        bottom: 10,
                     },
                 ))
                 .show(ui, |ui| self.compact_player(ui, &mut actions));
@@ -1481,7 +1486,7 @@ impl eframe::App for App {
             .frame(theme::panel(
                 colors.bg,
                 Margin {
-                    left: 26,
+                    left: views::PAGE_GUTTER as i8,
                     right: 18,
                     top: 18 + top,
                     bottom: 0,
@@ -1497,6 +1502,7 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "mini-return-window", &self.mini.library_window);
+        eframe::set_value(storage, "mini-on-top", &self.mini.on_top);
         eframe::set_value(storage, "update-cache", &self.updates.cache);
         eframe::set_value(storage, "settings", &self.settings);
         eframe::set_value(storage, "appearance", &self.appearance);

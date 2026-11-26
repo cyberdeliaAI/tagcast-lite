@@ -816,18 +816,46 @@ fn tile_actions(catalog: &Catalog, events: Vec<TileEvent>, actions: &mut Vec<Act
 /// Height of the title row at the top of a page.
 const HEADER: f32 = 34.0;
 
-/// The back arrow. It sits in the page's left margin, level with the title
-/// row, so that titles and content keep one left edge with or without it.
-fn back_button(ui: &mut Ui) -> bool {
+/// Space between the sidebar and the page content.
+pub(super) const PAGE_GUTTER: f32 = 26.0;
+
+/// Room the back arrow takes at the start of a page heading. Only the
+/// heading moves aside for it; the content below keeps the page edge.
+const BACK_SLOT: f32 = 26.0;
+const BACK_INSET: &str = "page-back-inset";
+const BACK_LINE: &str = "page-back-line";
+
+/// Lines the back arrow up with the title of a heading that does not start
+/// at the top of the page, such as a title beside a cover.
+fn align_back_arrow(ui: &Ui, y: f32) {
+    ui.data_mut(|data| data.insert_temp(Id::unique(BACK_LINE), y));
+}
+
+/// How far this frame's page heading starts from the page edge.
+fn back_inset(ui: &Ui) -> f32 {
+    ui.data(|data| data.get_temp::<f32>(Id::unique(BACK_INSET)))
+        .unwrap_or(0.0)
+}
+
+/// Starts a heading row after the back arrow, when there is one.
+fn indent_heading(ui: &mut Ui) {
+    let inset = back_inset(ui);
+    if inset > 0.0 {
+        ui.add_space(inset);
+    }
+}
+
+/// The back arrow, at the start of the heading with its point on the page
+/// edge and level with the title. Headings start after it; see [`indent_heading`].
+fn back_button(ui: &mut Ui, page: Rect, line: f32) -> bool {
     let colors = theme::colors(ui.ctx());
-    let page = ui.max_rect();
-    let centre = pos2(page.left() - 13.0, page.top() + HEADER / 2.0);
-    let rect = Rect::from_center_size(centre, vec2(26.0, HEADER));
+    let centre = pos2(page.left() + 4.0, line);
+    let rect = Rect::from_center_size(centre, vec2(32.0, HEADER));
     let response = ui.interact(rect, Id::unique("page-back"), Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Back"));
     if response.hovered() {
         ui.painter()
-            .circle_filled(centre, 12.0, colors.surface_hi.gamma_multiply(0.8));
+            .circle_filled(centre, 14.0, colors.surface_hi.gamma_multiply(0.8));
     }
     let color = if response.hovered() {
         colors.text
@@ -849,9 +877,10 @@ fn back_button(ui: &mut Ui) -> bool {
 /// Reserves the title row. Pages whose subtitle depends on the filters below
 /// it reserve first and fill the row with [`page_header_in`] afterwards.
 fn header_slot(ui: &mut Ui) -> Rect {
+    let inset = back_inset(ui);
     let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER), Sense::hover());
     ui.add_space(12.0);
-    slot
+    Rect::from_min_max(pos2(slot.left() + inset, slot.top()), slot.max)
 }
 
 /// The title row of a page: the title, a quieter subtitle on the same
@@ -903,6 +932,41 @@ fn page_header_in(
         let drop = Size::ASCENT * (Size::TITLE - Size::BODY);
         label_at(ui, "page-subtitle", pos2(left, top + drop), subtitle);
     }
+}
+
+/// The line beneath a playlist title: its description on the left and the
+/// song count and length under the buttons on the right. Under the buttons
+/// the count stays in view however long the title is.
+fn playlist_details(ui: &mut Ui, id: u64, description: &str, counts: &str, right: f32) {
+    let colors = theme::colors(ui.ctx());
+    let width = ui.available_width();
+    let counts = theme::line(
+        ui.painter(),
+        counts,
+        regular(Size::BODY),
+        colors.muted,
+        width,
+    );
+    let top = ui.cursor().top();
+    if description.is_empty() {
+        ui.allocate_exact_size(vec2(width, counts.size().y), Sense::hover());
+    } else {
+        // The description wraps before it reaches the count.
+        let room = (width - counts.size().x - 24.0).max(80.0);
+        ui.allocate_ui(vec2(room, 84.0), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt(("playlist-description", id))
+                .auto_shrink([false, true])
+                .max_height(84.0)
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(RichText::new(description).color(colors.muted)).wrap());
+                });
+        });
+    }
+    // The dots of the More button, the last of the buttons above, end about
+    // ten points in from its edge; the count ends there too.
+    let left = right - 10.0 - counts.size().x;
+    label_at(ui, "playlist-counts", pos2(left, top), counts);
 }
 
 /// Places laid-out text as a label, so that assistive technology can read it.
@@ -1297,9 +1361,12 @@ impl App {
             }
             return;
         }
-        if !self.history.is_empty() && back_button(ui) {
-            actions.push(Action::Back);
-        }
+        let back = !self.history.is_empty();
+        let page = ui.max_rect();
+        ui.data_mut(|data| {
+            data.insert_temp(Id::unique(BACK_INSET), if back { BACK_SLOT } else { 0.0 });
+            data.insert_temp(Id::unique(BACK_LINE), page.top() + HEADER / 2.0);
+        });
         match self.page.clone() {
             Page::Songs => self.songs_page(ui, actions),
             Page::Albums => self.albums_page(ui, None, actions),
@@ -1316,6 +1383,11 @@ impl App {
             Page::Browse => self.browse_page(ui, actions),
             Page::BrowseAlbums(group) => self.albums_page(ui, Some(&group), actions),
             Page::Collection(collection) => self.collection_page(ui, collection, actions),
+        }
+        // Drawn after the page, which may have moved the title line.
+        let line = ui.data(|data| data.get_temp::<f32>(Id::unique(BACK_LINE)));
+        if back && back_button(ui, page, line.unwrap_or(page.top() + HEADER / 2.0)) {
+            actions.push(Action::Back);
         }
     }
 
@@ -1932,6 +2004,7 @@ impl App {
             )
             .map(|image| image.0);
         ui.horizontal_top(|ui| {
+            indent_heading(ui);
             let (cover, _) = ui.allocate_exact_size(Vec2::splat(168.0), Sense::hover());
             theme::cover(ui.painter(), cover, texture, 10, &album.name);
             ui.add_space(14.0);
@@ -1942,7 +2015,7 @@ impl App {
                         .font(strong(Size::MICRO))
                         .color(colors.faint),
                 );
-                ui.add(
+                let title = ui.add(
                     egui::Label::new(
                         RichText::new(&album.name)
                             .font(strong(Size::TITLE))
@@ -1950,6 +2023,9 @@ impl App {
                     )
                     .wrap(),
                 );
+                // Level with the first line of a title that may wrap.
+                let line = ui.fonts_mut(|fonts| fonts.row_height(&strong(Size::TITLE)));
+                align_back_arrow(ui, title.rect.top() + line / 2.0);
                 let artist = ui.add(
                     egui::Label::new(
                         RichText::new(&album.artist)
@@ -2085,16 +2161,18 @@ impl App {
             ArtSize::Small,
         );
         ui.horizontal(|ui| {
+            indent_heading(ui);
             let (avatar, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
             artist_picture(ui.painter(), avatar, texture, &artist.name, 32);
             ui.add_space(6.0);
             ui.vertical(|ui| {
                 ui.add_space(4.0);
-                ui.label(
+                let name = ui.label(
                     RichText::new(&artist.name)
                         .font(strong(Size::TITLE))
                         .color(colors.text),
                 );
+                align_back_arrow(ui, name.rect.center().y);
                 ui.label(
                     RichText::new(format!(
                         "{} · {} · {}",
@@ -2135,23 +2213,26 @@ impl App {
                 return;
             };
             page_header(ui, &playlist.title, "Playlist folder", |_| ());
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for child in &playlist.tracks {
-                    if let Some(index) = catalog.playlist_index(*child)
-                        && catalog.library.playlists[index].id != playlist.id
-                    {
-                        let child = &catalog.library.playlists[index];
-                        let icon = if child.folder {
-                            Icon::Folder
-                        } else {
-                            Icon::Playlist
-                        };
-                        if nav_item(ui, Some(icon), &child.title, None, false).clicked() {
-                            actions.push(Action::Go(Page::Playlist(index)));
+            // Each folder and playlist keeps its own scroll position.
+            egui::ScrollArea::vertical()
+                .id_salt(("playlist", playlist.id))
+                .show(ui, |ui| {
+                    for child in &playlist.tracks {
+                        if let Some(index) = catalog.playlist_index(*child)
+                            && catalog.library.playlists[index].id != playlist.id
+                        {
+                            let child = &catalog.library.playlists[index];
+                            let icon = if child.folder {
+                                Icon::Folder
+                            } else {
+                                Icon::Playlist
+                            };
+                            if nav_item(ui, Some(icon), &child.title, None, false).clicked() {
+                                actions.push(Action::Go(Page::Playlist(index)));
+                            }
                         }
                     }
-                }
-            });
+                });
             return;
         };
         let rows = &detail.tracks;
@@ -2163,6 +2244,7 @@ impl App {
         let playlist = &catalog.library.playlists[index];
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
+            indent_heading(ui);
             let (cover, _) = ui.allocate_exact_size(Vec2::splat(64.0), Sense::hover());
             playlist_cover(
                 ui,
@@ -2173,29 +2255,19 @@ impl App {
                 catalog,
             );
             ui.vertical(|ui| {
-                let height = if playlist.description.is_empty() {
-                    cover.height()
-                } else {
-                    HEADER
-                };
                 let (header, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-                page_header_in(ui, header, &playlist.title, &subtitle, |ui| {
+                    ui.allocate_exact_size(vec2(ui.available_width(), HEADER), Sense::hover());
+                align_back_arrow(ui, header.center().y);
+                page_header_in(ui, header, &playlist.title, "", |ui| {
                     play_buttons_reversed(ui, rows, actions)
                 });
-                if !playlist.description.is_empty() {
-                    let muted = theme::colors(ui.ctx()).muted;
-                    egui::ScrollArea::vertical()
-                        .id_salt(("playlist-description", playlist.id))
-                        .auto_shrink([false, true])
-                        .max_height(84.0)
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::Label::new(RichText::new(&playlist.description).color(muted))
-                                    .wrap(),
-                            );
-                        });
-                }
+                playlist_details(
+                    ui,
+                    playlist.id,
+                    &playlist.description,
+                    &subtitle,
+                    header.right(),
+                );
             });
         });
         ui.add_space(12.0);
@@ -2211,18 +2283,21 @@ impl App {
             removable: false,
         };
         let mut events = Vec::new();
-        library_list(
-            ui,
-            "playlist",
-            catalog,
-            rows,
-            &[],
-            style,
-            now,
-            selected,
-            None,
-            &mut events,
-        );
+        // Each playlist keeps its own scroll position.
+        ui.push_id(playlist.id, |ui| {
+            library_list(
+                ui,
+                "playlist",
+                catalog,
+                rows,
+                &[],
+                style,
+                now,
+                selected,
+                None,
+                &mut events,
+            )
+        });
         row_actions(catalog, rows, events, &mut self.selected, None, actions);
     }
 
@@ -2676,39 +2751,16 @@ impl App {
         ) {
             actions.push(Action::Previous);
         }
-        {
-            let rect = Rect::from_center_size(pos2(cx, cy), Vec2::splat(42.0));
-            let response = ui.interact(rect, Id::unique("np-play"), Sense::click());
-            let enabled = has_track || !self.queue.is_empty();
-            let fill = if !enabled {
-                colors.surface_hi
-            } else if response.hovered() {
-                colors.play.lerp_to_gamma(colors.bg, 0.22)
-            } else {
-                colors.play
-            };
-            ui.painter().circle_filled(rect.center(), 20.0, fill);
-            let icon = if playing { Icon::Pause } else { Icon::Play };
-            let nudge = if playing { 0.0 } else { 1.5 };
-            paint_icon(
-                ui.painter(),
-                Rect::from_center_size(rect.center() + vec2(nudge, 0.0), Vec2::splat(18.0)),
-                icon,
-                theme::control_ink(colors.bar, fill),
-            );
-            if enabled && response.on_hover_cursor(CursorIcon::PointingHand).clicked() {
-                actions.push(Action::TogglePlay);
-            }
-            if matches!(snapshot.phase, Phase::Buffering | Phase::Recovering) {
-                let t = ui.input(|i| i.time) as f32;
-                let points: Vec<_> = (0..=16)
-                    .map(|i| rect.center() + Vec2::angled(t * 5.0 + i as f32 * 0.1) * 23.5)
-                    .collect();
-                ui.painter().add(egui::Shape::line(
-                    points,
-                    Stroke::new(2.0, colors.accent_text),
-                ));
-            }
+        if play_button(
+            ui,
+            Id::unique("np-play"),
+            pos2(cx, cy),
+            42.0,
+            playing,
+            has_track || !self.queue.is_empty(),
+            matches!(snapshot.phase, Phase::Buffering | Phase::Recovering),
+        ) {
+            actions.push(Action::TogglePlay);
         }
         if button(
             ui,
@@ -2747,48 +2799,18 @@ impl App {
             }
         }
 
-        let duration = snapshot
-            .duration
-            .or_else(|| entry.as_ref().map(|e| e.track.seconds).filter(|s| *s > 0.0));
-        let position = self.seeking.map_or(snapshot.position, |(target, _)| target);
         let bar_y = center.bottom() - 14.0;
         let label_w = 46.0;
         let bar_width = (center.width() - 2.0 * label_w - 16.0).min(560.0);
         let bar = Rect::from_center_size(pos2(cx, bar_y), vec2(bar_width, 4.0));
-        let can_seek = has_track
-            && duration.is_some()
-            && matches!(
-                snapshot.phase,
-                Phase::Playing | Phase::Buffering | Phase::Recovering
-            );
-        let fraction = duration.map_or(0.0, |d| (position / d).clamp(0.0, 1.0) as f32);
-        let (shown, release, _) = slider(ui, Id::unique("seek"), bar, fraction, can_seek);
-        let shown_position = duration.map_or(position, |d| f64::from(shown) * d);
-        ui.painter().text(
-            pos2(bar.left() - 10.0, bar_y),
-            Align2::RIGHT_CENTER,
-            if has_track {
-                format_time(shown_position)
-            } else {
-                String::new()
-            },
-            regular(Size::SMALL),
-            colors.muted,
+        self.seek_bar(
+            ui,
+            Id::unique("seek"),
+            bar,
+            &snapshot,
+            entry.as_ref(),
+            actions,
         );
-        ui.painter().text(
-            pos2(bar.right() + 10.0, bar_y),
-            Align2::LEFT_CENTER,
-            match (has_track, duration) {
-                (true, Some(d)) => format_time(d),
-                (true, None) => "–:––".into(),
-                _ => String::new(),
-            },
-            regular(Size::SMALL),
-            colors.muted,
-        );
-        if let (Some(fraction), Some(duration)) = (release, duration) {
-            actions.push(Action::Seek(f64::from(fraction) * duration));
-        }
 
         // Right: stream quality, queue and volume.
         let vy = right.center().y;
@@ -2921,6 +2943,108 @@ impl App {
 }
 
 /// A thin horizontal slider. Returns the fraction to show and, when the user lets go, the chosen fraction.
+/// The round play and pause button. `size` is its diameter; `waiting` draws
+/// a turning ring while the stream buffers.
+pub(super) fn play_button(
+    ui: &mut Ui,
+    id: Id,
+    center: egui::Pos2,
+    size: f32,
+    playing: bool,
+    enabled: bool,
+    waiting: bool,
+) -> bool {
+    let colors = theme::colors(ui.ctx());
+    let scale = size / 42.0;
+    let rect = Rect::from_center_size(center, Vec2::splat(size));
+    let response = ui.interact(rect, id, Sense::click());
+    let label = if playing { "Pause" } else { "Play" };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+    let fill = if !enabled {
+        colors.surface_hi
+    } else if response.hovered() {
+        colors.play.lerp_to_gamma(colors.bg, 0.22)
+    } else {
+        colors.play
+    };
+    ui.painter().circle_filled(center, 20.0 * scale, fill);
+    let icon = if playing { Icon::Pause } else { Icon::Play };
+    let nudge = if playing { 0.0 } else { 1.5 * scale };
+    paint_icon(
+        ui.painter(),
+        Rect::from_center_size(center + vec2(nudge, 0.0), Vec2::splat(18.0 * scale)),
+        icon,
+        theme::control_ink(colors.bar, fill),
+    );
+    if waiting {
+        let t = ui.input(|i| i.time) as f32;
+        let points: Vec<_> = (0..=16)
+            .map(|i| center + Vec2::angled(t * 5.0 + i as f32 * 0.1) * 23.5 * scale)
+            .collect();
+        ui.painter().add(egui::Shape::line(
+            points,
+            Stroke::new(2.0, colors.accent_text),
+        ));
+    }
+    enabled && response.on_hover_cursor(CursorIcon::PointingHand).clicked()
+}
+
+impl App {
+    /// The position bar with the elapsed and total time either side of it.
+    /// Releasing it after a drag or click asks to seek there.
+    pub(super) fn seek_bar(
+        &self,
+        ui: &mut Ui,
+        id: Id,
+        bar: Rect,
+        snapshot: &tagcast_player::audio::Snapshot,
+        entry: Option<&super::queue::Entry>,
+        actions: &mut Vec<Action>,
+    ) {
+        let colors = theme::colors(ui.ctx());
+        let has_track = entry.is_some();
+        let duration = snapshot
+            .duration
+            .or_else(|| entry.map(|e| e.track.seconds).filter(|s| *s > 0.0));
+        let position = self.seeking.map_or(snapshot.position, |(target, _)| target);
+        let can_seek = has_track
+            && duration.is_some()
+            && matches!(
+                snapshot.phase,
+                Phase::Playing | Phase::Buffering | Phase::Recovering
+            );
+        let fraction = duration.map_or(0.0, |d| (position / d).clamp(0.0, 1.0) as f32);
+        let (shown, release, _) = slider(ui, id, bar, fraction, can_seek);
+        let shown_position = duration.map_or(position, |d| f64::from(shown) * d);
+        let y = bar.center().y;
+        ui.painter().text(
+            pos2(bar.left() - 10.0, y),
+            Align2::RIGHT_CENTER,
+            if has_track {
+                format_time(shown_position)
+            } else {
+                String::new()
+            },
+            regular(Size::SMALL),
+            colors.muted,
+        );
+        ui.painter().text(
+            pos2(bar.right() + 10.0, y),
+            Align2::LEFT_CENTER,
+            match (has_track, duration) {
+                (true, Some(d)) => format_time(d),
+                (true, None) => "–:––".into(),
+                _ => String::new(),
+            },
+            regular(Size::SMALL),
+            colors.muted,
+        );
+        if let (Some(fraction), Some(duration)) = (release, duration) {
+            actions.push(Action::Seek(f64::from(fraction) * duration));
+        }
+    }
+}
+
 fn slider(
     ui: &mut Ui,
     id: Id,
@@ -3368,7 +3492,31 @@ mod header_tests {
     }
 
     #[test]
-    fn the_back_arrow_in_the_page_margin_takes_clicks() {
+    fn the_back_arrow_moves_the_heading_but_not_the_content_below() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 200.0))),
+            ..Default::default()
+        };
+        let mut edges = Vec::new();
+        for inset in [0.0, BACK_SLOT] {
+            let mut output = ctx.run_ui(input(), |ui| {
+                ui.data_mut(|data| data.insert_temp(Id::unique(BACK_INSET), inset));
+                let slot = header_slot(ui);
+                let (content, _) = ui.allocate_exact_size(vec2(100.0, 20.0), Sense::hover());
+                edges.push((slot.left(), content.left()));
+            });
+            output.textures_delta.clear();
+        }
+        let ((title, content), (moved, kept)) = (edges[0], edges[1]);
+        assert_eq!(title, content);
+        assert_eq!(moved, title + BACK_SLOT);
+        assert_eq!(kept, content);
+    }
+
+    #[test]
+    fn the_back_arrow_at_the_page_edge_takes_clicks() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let mut clicked = false;
@@ -3379,14 +3527,15 @@ mod header_tests {
                 ..Default::default()
             };
             let mut output = ctx.run_ui(input, |ui| {
-                egui::Frame::new().inner_margin(26).show(ui, |ui| {
-                    clicked |= back_button(ui);
+                egui::Frame::new().inner_margin(PAGE_GUTTER).show(ui, |ui| {
+                    let page = ui.max_rect();
+                    clicked |= back_button(ui, page, page.top() + HEADER / 2.0);
                     ui.allocate_space(ui.available_size());
                 });
             });
             output.textures_delta.clear();
         };
-        let pos = pos2(13.0, 26.0 + HEADER / 2.0);
+        let pos = pos2(PAGE_GUTTER + 4.0, PAGE_GUTTER + HEADER / 2.0);
         let button = |pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,

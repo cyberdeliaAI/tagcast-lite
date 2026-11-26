@@ -271,6 +271,11 @@ impl Updates {
     pub fn checked(&self) -> bool {
         self.cache.latest.is_some()
     }
+    /// Seconds since the last release check, when that check succeeded.
+    pub fn checked_ago(&self) -> Option<u64> {
+        (self.checked() && !self.cache.failed && self.cache.attempted > 0)
+            .then(|| now().saturating_sub(self.cache.attempted))
+    }
     pub fn downloadable(&self) -> bool {
         self.available().is_some_and(|r| r.asset.is_some())
     }

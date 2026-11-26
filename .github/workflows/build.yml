@@ -2,6 +2,9 @@ name: Native builds
 
 on:
   push:
+    # Commits to main are tested before a release tag needs them.
+    branches:
+      - main
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
