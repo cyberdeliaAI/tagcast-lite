@@ -934,6 +934,41 @@ fn page_header_in(
     }
 }
 
+/// The line beneath a playlist title: its description on the left and the
+/// song count and length under the buttons on the right. Under the buttons
+/// the count stays in view however long the title is.
+fn playlist_details(ui: &mut Ui, id: u64, description: &str, counts: &str, right: f32) {
+    let colors = theme::colors(ui.ctx());
+    let width = ui.available_width();
+    let counts = theme::line(
+        ui.painter(),
+        counts,
+        regular(Size::BODY),
+        colors.muted,
+        width,
+    );
+    let top = ui.cursor().top();
+    if description.is_empty() {
+        ui.allocate_exact_size(vec2(width, counts.size().y), Sense::hover());
+    } else {
+        // The description wraps before it reaches the count.
+        let room = (width - counts.size().x - 24.0).max(80.0);
+        ui.allocate_ui(vec2(room, 84.0), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt(("playlist-description", id))
+                .auto_shrink([false, true])
+                .max_height(84.0)
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(RichText::new(description).color(colors.muted)).wrap());
+                });
+        });
+    }
+    // The dots of the More button, the last of the buttons above, end about
+    // ten points in from its edge; the count ends there too.
+    let left = right - 10.0 - counts.size().x;
+    label_at(ui, "playlist-counts", pos2(left, top), counts);
+}
+
 /// Places laid-out text as a label, so that assistive technology can read it.
 fn label_at(ui: &mut Ui, salt: &str, pos: egui::Pos2, text: Arc<egui::Galley>) -> Rect {
     let rect = Rect::from_min_size(pos, text.size());
@@ -2220,30 +2255,19 @@ impl App {
                 catalog,
             );
             ui.vertical(|ui| {
-                let height = if playlist.description.is_empty() {
-                    cover.height()
-                } else {
-                    HEADER
-                };
                 let (header, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+                    ui.allocate_exact_size(vec2(ui.available_width(), HEADER), Sense::hover());
                 align_back_arrow(ui, header.center().y);
-                page_header_in(ui, header, &playlist.title, &subtitle, |ui| {
+                page_header_in(ui, header, &playlist.title, "", |ui| {
                     play_buttons_reversed(ui, rows, actions)
                 });
-                if !playlist.description.is_empty() {
-                    let muted = theme::colors(ui.ctx()).muted;
-                    egui::ScrollArea::vertical()
-                        .id_salt(("playlist-description", playlist.id))
-                        .auto_shrink([false, true])
-                        .max_height(84.0)
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::Label::new(RichText::new(&playlist.description).color(muted))
-                                    .wrap(),
-                            );
-                        });
-                }
+                playlist_details(
+                    ui,
+                    playlist.id,
+                    &playlist.description,
+                    &subtitle,
+                    header.right(),
+                );
             });
         });
         ui.add_space(12.0);
