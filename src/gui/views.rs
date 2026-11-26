@@ -2135,23 +2135,26 @@ impl App {
                 return;
             };
             page_header(ui, &playlist.title, "Playlist folder", |_| ());
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for child in &playlist.tracks {
-                    if let Some(index) = catalog.playlist_index(*child)
-                        && catalog.library.playlists[index].id != playlist.id
-                    {
-                        let child = &catalog.library.playlists[index];
-                        let icon = if child.folder {
-                            Icon::Folder
-                        } else {
-                            Icon::Playlist
-                        };
-                        if nav_item(ui, Some(icon), &child.title, None, false).clicked() {
-                            actions.push(Action::Go(Page::Playlist(index)));
+            // Each folder and playlist keeps its own scroll position.
+            egui::ScrollArea::vertical()
+                .id_salt(("playlist", playlist.id))
+                .show(ui, |ui| {
+                    for child in &playlist.tracks {
+                        if let Some(index) = catalog.playlist_index(*child)
+                            && catalog.library.playlists[index].id != playlist.id
+                        {
+                            let child = &catalog.library.playlists[index];
+                            let icon = if child.folder {
+                                Icon::Folder
+                            } else {
+                                Icon::Playlist
+                            };
+                            if nav_item(ui, Some(icon), &child.title, None, false).clicked() {
+                                actions.push(Action::Go(Page::Playlist(index)));
+                            }
                         }
                     }
-                }
-            });
+                });
             return;
         };
         let rows = &detail.tracks;
@@ -2211,18 +2214,21 @@ impl App {
             removable: false,
         };
         let mut events = Vec::new();
-        library_list(
-            ui,
-            "playlist",
-            catalog,
-            rows,
-            &[],
-            style,
-            now,
-            selected,
-            None,
-            &mut events,
-        );
+        // Each playlist keeps its own scroll position.
+        ui.push_id(playlist.id, |ui| {
+            library_list(
+                ui,
+                "playlist",
+                catalog,
+                rows,
+                &[],
+                style,
+                now,
+                selected,
+                None,
+                &mut events,
+            )
+        });
         row_actions(catalog, rows, events, &mut self.selected, None, actions);
     }
 

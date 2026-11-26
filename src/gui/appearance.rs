@@ -208,6 +208,7 @@ pub struct SettingsWindow {
     draft: Option<Draft>,
     confirm_delete: bool,
     confirm_sign_out: bool,
+    release_notes: bool,
 }
 
 impl SettingsWindow {
@@ -389,7 +390,7 @@ impl SettingsWindow {
                         Section::Appearance => changed |= self.appearance(ui, preferences),
                         Section::Account => closed |= self.account(ui, state, actions),
                         Section::Shortcuts => shortcuts(ui),
-                        Section::About => about(ui, state, actions),
+                        Section::About => about(ui, state, &mut self.release_notes, actions),
                     }
                 }
                 ui.add_space(18.0);
@@ -863,7 +864,12 @@ fn shortcuts(ui: &mut Ui) {
     );
 }
 
-fn about(ui: &mut Ui, state: &SettingsState<'_>, actions: &mut Vec<Action>) {
+fn about(
+    ui: &mut Ui,
+    state: &SettingsState<'_>,
+    release_notes: &mut bool,
+    actions: &mut Vec<Action>,
+) {
     let colors = theme::colors(ui.ctx());
     ui.add_space(4.0);
     ui.horizontal(|ui| {
@@ -888,75 +894,10 @@ fn about(ui: &mut Ui, state: &SettingsState<'_>, actions: &mut Vec<Action>) {
             );
         });
     });
-    ui.add_space(18.0);
     if let Some(updates) = state.updates {
-        use super::updates::Phase;
-        card(ui, |ui| {
-            ui.heading("Updates");
-            let mut automatic = state.automatic_updates;
-            if ui
-                .checkbox(&mut automatic, "Check automatically once a day")
-                .changed()
-            {
-                actions.push(Action::SetAutomaticUpdates(automatic));
-            }
-            if let Some(release) = updates.available() {
-                ui.label(format!("Version {} is available", release.version));
-                if !release.notes.is_empty() {
-                    ui.collapsing("Release notes", |ui| {
-                        ui.label(&release.notes);
-                    });
-                }
-            }
-            if let Some(error) = &updates.error {
-                ui.colored_label(colors.warn, error);
-            }
-            match updates.phase {
-                Phase::Checking | Phase::Downloading | Phase::Installing => {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(match updates.phase {
-                            Phase::Checking => "Checking GitHub…",
-                            Phase::Downloading => "Downloading and verifying the update…",
-                            _ => "Installing the update…",
-                        });
-                    });
-                }
-                Phase::Ready => {
-                    ui.label(if updates.ready_with_brew() {
-                        "Homebrew has downloaded the update."
-                    } else {
-                        "The verified update is ready."
-                    });
-                    ui.label("Installing will stop playback and restart Tagcast Lite.");
-                    if ui.button("Install and restart").clicked() {
-                        actions.push(Action::InstallUpdate);
-                    }
-                }
-                Phase::Idle => {
-                    if updates.error.is_none() && updates.checked() && updates.available().is_none()
-                    {
-                        ui.label("You’re running the latest version.");
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        if updates.downloadable() && ui.button("Download update").clicked() {
-                            actions.push(Action::DownloadUpdate);
-                        }
-                        if ui.button("Check now").clicked() {
-                            actions.push(Action::CheckUpdates);
-                        }
-                    });
-                    if updates.available().is_some() && !updates.downloadable() {
-                        ui.hyperlink_to(
-                            "View release downloads",
-                            format!("{REPOSITORY}/releases/latest"),
-                        );
-                    }
-                }
-            }
-        });
-        ui.add_space(12.0);
+        update_card(ui, updates, state.automatic_updates, release_notes, actions);
     }
+    caption(ui, "PROJECT");
     card(ui, |ui| {
         let detail = ("github.com/cyberdeliaAI/tagcast-lite", colors.muted);
         row(ui, "Source code and releases", Some(detail), |ui| {
@@ -982,6 +923,302 @@ fn about(ui: &mut Ui, state: &SettingsState<'_>, actions: &mut Vec<Action>) {
         );
         row(ui, "MIT licence", Some(detail), |_| ());
     });
+}
+
+/// What the update row says and offers in each state of the updater.
+#[derive(Debug, PartialEq)]
+enum UpdateStatus {
+    Busy(String, &'static str),
+    Ready { version: String, brew: bool },
+    Available { version: String, downloadable: bool },
+    Failed(String),
+    Current(Option<u64>),
+    Unchecked,
+}
+
+impl UpdateStatus {
+    fn of(updates: &super::updates::Updates) -> Self {
+        use super::updates::Phase;
+        let available = updates.available().map(|release| release.version.clone());
+        match (updates.phase, available) {
+            (Phase::Checking, _) => Self::Busy(
+                "Checking for updates…".into(),
+                "Asking GitHub for the latest release.",
+            ),
+            (Phase::Downloading, version) => Self::Busy(
+                format!("Downloading version {}…", version.unwrap_or_default()),
+                "The download is verified as it arrives. Music keeps playing.",
+            ),
+            (Phase::Installing, version) => Self::Busy(
+                format!("Installing version {}…", version.unwrap_or_default()),
+                "Tagcast Lite restarts when the update is in place.",
+            ),
+            (Phase::Ready, version) => Self::Ready {
+                version: version.unwrap_or_default(),
+                brew: updates.ready_with_brew(),
+            },
+            (Phase::Idle, Some(version)) => Self::Available {
+                version,
+                downloadable: updates.downloadable(),
+            },
+            (Phase::Idle, None) => match &updates.error {
+                Some(error) => Self::Failed(error.clone()),
+                None if updates.checked() => Self::Current(updates.checked_ago()),
+                None => Self::Unchecked,
+            },
+        }
+    }
+}
+
+/// A rough age for a past event, such as “3 hours ago”.
+fn ago(seconds: u64) -> String {
+    let (value, unit) = match seconds {
+        0..60 => return "just now".into(),
+        60..3_600 => (seconds / 60, "minute"),
+        3_600..86_400 => (seconds / 3_600, "hour"),
+        _ => (seconds / 86_400, "day"),
+    };
+    let plural = if value == 1 { "" } else { "s" };
+    format!("{value} {unit}{plural} ago")
+}
+
+fn update_card(
+    ui: &mut Ui,
+    updates: &super::updates::Updates,
+    automatic: bool,
+    release_notes: &mut bool,
+    actions: &mut Vec<Action>,
+) {
+    let colors = theme::colors(ui.ctx());
+    let current = env!("CARGO_PKG_VERSION");
+    caption(ui, "UPDATES");
+    card(ui, |ui| {
+        let detail = (
+            "Once a day, Tagcast Lite asks GitHub for the latest release.",
+            colors.muted,
+        );
+        row(ui, "Check automatically", Some(detail), |ui| {
+            let mut on = automatic;
+            if theme::toggle(ui, &mut on, "Check automatically").changed() {
+                actions.push(Action::SetAutomaticUpdates(on));
+            }
+        });
+        divider(ui);
+        // A failed download or install keeps the release on offer, with the reason beneath it.
+        let error = updates.error.as_deref();
+        match UpdateStatus::of(updates) {
+            UpdateStatus::Busy(title, detail) => {
+                row(ui, &title, Some((detail, colors.muted)), |ui| {
+                    ui.add(egui::Spinner::new().size(18.0).color(colors.accent_text));
+                });
+            }
+            UpdateStatus::Ready { version, brew } => {
+                let detail = if brew {
+                    "Homebrew has downloaded it. Installing stops playback and restarts the app."
+                } else {
+                    "The download is verified. Installing stops playback and restarts the app."
+                };
+                let title = format!("Version {version} is ready");
+                row(ui, &title, Some((detail, colors.muted)), |ui| {
+                    if theme::button(ui, "Install and restart", Tone::Primary).clicked() {
+                        actions.push(Action::InstallUpdate);
+                    }
+                });
+            }
+            UpdateStatus::Available {
+                version,
+                downloadable,
+            } => {
+                let usual = if downloadable {
+                    format!("You have {current}. Music keeps playing while it downloads.")
+                } else {
+                    format!("You have {current}. Download it from GitHub for this system.")
+                };
+                let detail = match error {
+                    Some(error) => (error, colors.warn),
+                    None => (usual.as_str(), colors.muted),
+                };
+                let title = format!("Version {version} is available");
+                row(ui, &title, Some(detail), |ui| {
+                    if downloadable {
+                        if theme::button(ui, "Download", Tone::Primary).clicked() {
+                            actions.push(Action::DownloadUpdate);
+                        }
+                    } else if theme::button(ui, "View downloads", Tone::Plain).clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(format!(
+                            "{REPOSITORY}/releases/latest"
+                        )));
+                    }
+                });
+            }
+            UpdateStatus::Failed(error) => {
+                let title = "Could not check for updates";
+                row(ui, title, Some((&error, colors.warn)), |ui| {
+                    if theme::button(ui, "Try again", Tone::Plain).clicked() {
+                        actions.push(Action::CheckUpdates);
+                    }
+                });
+            }
+            UpdateStatus::Current(age) => {
+                let detail = match age {
+                    Some(age) => format!("Version {current} · checked {}", ago(age)),
+                    None => format!("Version {current}"),
+                };
+                row(
+                    ui,
+                    "You’re up to date",
+                    Some((&detail, colors.muted)),
+                    |ui| {
+                        if theme::button(ui, "Check now", Tone::Plain).clicked() {
+                            actions.push(Action::CheckUpdates);
+                        }
+                    },
+                );
+            }
+            UpdateStatus::Unchecked => {
+                let detail = format!("Version {current}");
+                row(ui, "Not checked yet", Some((&detail, colors.muted)), |ui| {
+                    if theme::button(ui, "Check now", Tone::Plain).clicked() {
+                        actions.push(Action::CheckUpdates);
+                    }
+                });
+            }
+        }
+        let notes = updates
+            .available()
+            .map(|release| note_lines(&release.notes))
+            .filter(|notes| !notes.is_empty());
+        if let Some(notes) = notes {
+            divider(ui);
+            let label = if *release_notes { "Hide" } else { "Show" };
+            row(ui, "Release notes", None, |ui| {
+                if theme::button(ui, label, Tone::Plain).clicked() {
+                    *release_notes = !*release_notes;
+                }
+            });
+            if *release_notes {
+                show_notes(ui, &notes);
+                ui.add_space(12.0);
+            }
+        }
+    });
+}
+
+/// One line of release notes, reduced from GitHub Markdown to what the dialog shows.
+#[derive(Debug, PartialEq)]
+enum Note {
+    Heading(String),
+    /// A list item. `lead` is its bold opening phrase, if it has one.
+    Bullet {
+        lead: String,
+        text: String,
+    },
+    Text(String),
+}
+
+/// Turns release notes into plain lines. The download instructions that end
+/// the GitHub release do not apply inside the app, so the notes stop there.
+fn note_lines(markdown: &str) -> Vec<Note> {
+    let mut notes = Vec::new();
+    for line in markdown.lines().map(str::trim) {
+        if let Some(heading) = line.strip_prefix('#') {
+            let heading = inline(heading.trim_start_matches('#').trim());
+            if heading.eq_ignore_ascii_case("downloads") {
+                break;
+            }
+            notes.push(Note::Heading(heading));
+        } else if let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            let split = item
+                .strip_prefix("**")
+                .and_then(|rest| rest.split_once("**"));
+            notes.push(match split {
+                Some((lead, text)) => Note::Bullet {
+                    lead: inline(lead),
+                    text: inline(text.trim_start()),
+                },
+                None => Note::Bullet {
+                    lead: String::new(),
+                    text: inline(item),
+                },
+            });
+        } else if !line.is_empty() && line.chars().any(|c| !matches!(c, '-' | '*' | '_')) {
+            notes.push(Note::Text(inline(line)));
+        }
+    }
+    // A heading with nothing beneath it says nothing.
+    while matches!(notes.last(), Some(Note::Heading(_))) {
+        notes.pop();
+    }
+    notes
+}
+
+/// Drops inline Markdown: emphasis markers, code ticks and link targets.
+fn inline(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let (before, after) = rest.split_at(open);
+        out.push_str(before);
+        match after.find("](").zip(after.find(')')) {
+            Some((middle, close)) if middle < close => {
+                out.push_str(&after[1..middle]);
+                rest = &after[close + 1..];
+            }
+            _ => {
+                out.push('[');
+                rest = &after[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out.replace("**", "").replace("__", "").replace('`', "")
+}
+
+fn show_notes(ui: &mut Ui, notes: &[Note]) {
+    let colors = theme::colors(ui.ctx());
+    egui::ScrollArea::vertical()
+        .id_salt("release-notes")
+        .max_height(220.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            for note in notes {
+                match note {
+                    Note::Heading(text) => {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(text)
+                                .font(strong(Size::BODY))
+                                .color(colors.text),
+                        );
+                    }
+                    Note::Bullet { lead, text } => {
+                        let mut job = egui::text::LayoutJob::default();
+                        let format = |font, color| egui::TextFormat::simple(font, color);
+                        if !lead.is_empty() {
+                            job.append(lead, 0.0, format(strong(Size::SMALL), colors.text));
+                            job.append(" ", 0.0, format(regular(Size::SMALL), colors.muted));
+                        }
+                        job.append(text, 0.0, format(regular(Size::SMALL), colors.muted));
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            ui.label(RichText::new("•").color(colors.faint));
+                            ui.add(egui::Label::new(job).wrap());
+                        });
+                    }
+                    Note::Text(text) => {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text)
+                                    .font(regular(Size::SMALL))
+                                    .color(colors.muted),
+                            )
+                            .wrap(),
+                        );
+                    }
+                }
+            }
+        });
 }
 
 // ---- theme editor ---------------------------------------------------------
@@ -1298,7 +1535,7 @@ mod tests {
             });
             // Nothing paints these frames, so the font atlas has nowhere to go.
             output.textures_delta.clear();
-            let widgets = output
+            let mut widgets: Vec<_> = output
                 .platform_output
                 .accesskit_update
                 .into_iter()
@@ -1310,8 +1547,15 @@ mod tests {
                         pos2(bounds.x1 as f32, bounds.y1 as f32),
                     );
                     // Plain text reports itself as a value, controls as a label.
-                    Some((node.label().or(node.value())?.to_owned(), rect))
+                    let control = node.label().is_some();
+                    Some((control, node.label().or(node.value())?.to_owned(), rect))
                 })
+                .collect();
+            // Controls come first, so a click finds a switch before the row title that names it.
+            widgets.sort_by_key(|(control, ..)| !control);
+            let widgets = widgets
+                .into_iter()
+                .map(|(_, name, rect)| (name, rect))
                 .collect();
             (actions, widgets)
         }
@@ -1447,6 +1691,87 @@ mod tests {
         assert!(dialog.window.draft.is_none());
         assert!(dialog.window.open);
         assert!(dialog.preferences.custom.is_empty());
+    }
+
+    fn with_updates(mut dialog: Dialog, updates: super::super::updates::Updates) -> Dialog {
+        dialog.state.updates = Some(Box::leak(Box::new(updates)));
+        dialog
+    }
+
+    #[test]
+    fn the_update_row_checks_on_request_and_the_switch_turns_checks_off() {
+        let updates = super::super::updates::Updates::new(None);
+        let mut dialog = with_updates(Dialog::new(Section::About, true), updates);
+        let labels = dialog.labels();
+        assert!(labels.iter().any(|label| label == "Not checked yet"));
+        assert!(labels.iter().any(|label| label == "PROJECT"));
+        let actions = dialog.click("Check now");
+        assert!(matches!(actions[..], [Action::CheckUpdates]));
+        let actions = dialog.click("Check automatically");
+        assert!(matches!(actions[..], [Action::SetAutomaticUpdates(false)]));
+    }
+
+    #[test]
+    fn a_failed_check_shows_the_reason_and_offers_to_try_again() {
+        let mut updates = super::super::updates::Updates::new(None);
+        updates.error = Some("Could not reach GitHub".into());
+        let mut dialog = with_updates(Dialog::new(Section::About, true), updates);
+        let labels = dialog.labels();
+        assert!(
+            labels
+                .iter()
+                .any(|label| label == "Could not check for updates")
+        );
+        assert!(labels.iter().any(|label| label == "Could not reach GitHub"));
+        let actions = dialog.click("Try again");
+        assert!(matches!(actions[..], [Action::CheckUpdates]));
+    }
+
+    #[test]
+    fn a_running_check_says_so_and_offers_no_buttons() {
+        let mut updates = super::super::updates::Updates::new(None);
+        updates.phase = super::super::updates::Phase::Checking;
+        let mut dialog = with_updates(Dialog::new(Section::About, true), updates);
+        let labels = dialog.labels();
+        assert!(labels.iter().any(|label| label == "Checking for updates…"));
+        assert!(!labels.iter().any(|label| label == "Check now"));
+    }
+
+    #[test]
+    fn ages_read_naturally() {
+        assert_eq!(ago(20), "just now");
+        assert_eq!(ago(60), "1 minute ago");
+        assert_eq!(ago(3 * 3_600 + 5), "3 hours ago");
+        assert_eq!(ago(86_400), "1 day ago");
+        assert_eq!(ago(9 * 86_400), "9 days ago");
+    }
+
+    #[test]
+    fn release_notes_lose_markdown_and_stop_at_the_download_instructions() {
+        let markdown = "## What's new\n\n\
+            - **Mini player.** Press `Esc` to return.\n\
+            * See the [changelog](https://example.com/CHANGELOG.md) [for more].\n\
+            ---\n\
+            Thanks to __everyone__.\n\n\
+            ## Downloads\n\n\
+            Choose an archive below.\n";
+        assert_eq!(
+            note_lines(markdown),
+            [
+                Note::Heading("What's new".into()),
+                Note::Bullet {
+                    lead: "Mini player.".into(),
+                    text: "Press Esc to return.".into(),
+                },
+                Note::Bullet {
+                    lead: String::new(),
+                    text: "See the changelog [for more].".into(),
+                },
+                Note::Text("Thanks to everyone.".into()),
+            ]
+        );
+        assert!(note_lines("## Downloads\nChoose one.").is_empty());
+        assert!(note_lines("## Only a heading").is_empty());
     }
 
     #[test]
